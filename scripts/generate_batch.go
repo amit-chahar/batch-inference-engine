@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,6 +37,8 @@ type promptItem struct {
 
 func main() {
 	count := 1000
+	outputPath := "sample_batch.jsonl"
+
 	if len(os.Args) > 1 {
 		n, err := strconv.Atoi(os.Args[1])
 		if err != nil {
@@ -44,31 +47,49 @@ func main() {
 		}
 		count = n
 	}
+	if len(os.Args) > 2 {
+		outputPath = os.Args[2]
+	}
 
-	items := make([]promptItem, 0, count)
+	file, err := os.Create(outputPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create %s: %v\n", outputPath, err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
 	for i := range count {
 		topic := topics[i%len(topics)]
 		template := promptTemplates[i%len(promptTemplates)]
-		items = append(items, promptItem{
+		item := promptItem{
 			ID:     fmt.Sprintf("prompt-%04d", i),
 			Prompt: fmt.Sprintf(template, topic),
 			Metadata: map[string]any{
 				"index": i,
 				"topic": topic,
 			},
-		})
+		}
+
+		line, err := json.Marshal(item)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "marshal item %d: %v\n", i, err)
+			os.Exit(1)
+		}
+		if _, err := writer.Write(line); err != nil {
+			fmt.Fprintf(os.Stderr, "write item %d: %v\n", i, err)
+			os.Exit(1)
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			fmt.Fprintf(os.Stderr, "write newline for item %d: %v\n", i, err)
+			os.Exit(1)
+		}
 	}
 
-	out, err := json.MarshalIndent(items, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "marshal batch: %v\n", err)
+	if err := writer.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "flush %s: %v\n", outputPath, err)
 		os.Exit(1)
 	}
 
-	if err := os.WriteFile("sample_batch.json", append(out, '\n'), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "write sample_batch.json: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Wrote %d items to sample_batch.json\n", len(items))
+	fmt.Printf("Wrote %d lines to %s\n", count, outputPath)
 }

@@ -5,7 +5,7 @@
 ```mermaid
 flowchart TB
     subgraph ingestion["1. Batch File Ingestion"]
-        JSON["sample_batch.json<br/>(1,000 prompts)"]
+        JSON["sample_batch.jsonl<br/>(1,000 lines)"]
         Submit["POST /job/submit"]
         JobID["Return Job ID immediately"]
         JSON --> Submit --> JobID

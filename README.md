@@ -33,12 +33,12 @@ curl http://localhost:8000/health
 ```bash
 curl -X POST http://localhost:8000/job/submit \
   -H "Content-Type: application/json" \
-  -d '{"input_file": "sample_batch.json"}'
+  -d '{"input_file": "sample_batch.jsonl"}'
 ```
 
 ## Sample input
 
-`sample_batch.json` contains **1,000** prompt items. Regenerate with:
+`sample_batch.jsonl` contains **1,000** prompt lines (JSONL). Regenerate with:
 
 ```bash
 make generate-batch
