@@ -18,6 +18,7 @@ func TestShouldRetry(t *testing.T) {
 		want   bool
 	}{
 		{status: http.StatusTooManyRequests, want: true},
+		{status: http.StatusInternalServerError, want: true},
 		{status: http.StatusBadGateway, want: true},
 		{status: http.StatusServiceUnavailable, want: true},
 		{status: http.StatusGatewayTimeout, want: true},

@@ -1,5 +1,5 @@
 // Package worker runs concurrent inference calls with rate-limit aware retries.
-// Backoff logic lives here; the inference HTTP client (Step 8) will call into it.
+// Backoff and the DO inference HTTP client live here; the worker pool (Step 9) calls Complete().
 package worker
 
 import (
@@ -13,10 +13,11 @@ import (
 
 // retryableStatusCodes are retried with exponential backoff (transient upstream pressure).
 var retryableStatusCodes = map[int]struct{}{
-	http.StatusTooManyRequests:    {}, // 429 — primary interview scenario
-	http.StatusBadGateway:         {}, // 502
-	http.StatusServiceUnavailable: {}, // 503
-	http.StatusGatewayTimeout:     {}, // 504
+	http.StatusTooManyRequests:     {}, // 429 — primary interview scenario
+	http.StatusInternalServerError: {}, // 500 — transient upstream failures
+	http.StatusBadGateway:          {}, // 502
+	http.StatusServiceUnavailable:  {}, // 503
+	http.StatusGatewayTimeout:      {}, // 504
 }
 
 // Backoff computes retry delays with exponential growth and jitter.

@@ -47,11 +47,11 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | D10 | Job IDs | **`github.com/google/uuid`** | Implemented | Standard, collision-safe IDs without rolling our own. |
 | D11 | Ingest parsing | **`bufio.Scanner` + line JSON decode** | Implemented | Simple JSONL reader; constant memory per row. Malformed lines emit errors but don’t abort the file scan. |
 | D12 | Backoff | **Custom `internal/worker/backoff`** | Implemented | Interview asks to demonstrate 429 handling. ~100 lines, fully tested, honors `Retry-After`. Libraries (`cenkalti/backoff`, `go-retryablehttp`) exist but custom code shows understanding. **Decision reaffirmed:** keep custom helper. |
-| D13 | Retryable HTTP codes | **429, 502, 503, 504** | Implemented | Rate limits + transient upstream failures. **4xx (except 429)** → permanent row failure, no retry. |
+| D13 | Retryable HTTP codes | **429, 500, 502, 503, 504** | Implemented | Rate limits + transient upstream failures. **4xx (except 429)** → permanent row failure, no retry. |
 | D14 | Backoff formula | `min(max, initial × 2^attempt) + jitter(0–25%)` | Implemented | Spread retries under parallel load; jitter reduces thundering herd across workers. |
 | D15 | CI/CD | **GitHub Actions** (`go vet`, `go test -race`, `go build`) | Implemented | Spec requirement. Temporarily removed during billing issue, restored once fixed. |
 | D16 | Commit strategy | **Small steps → test → commit → push** | Ongoing | Frequent reviewable diffs; easier to explain timeline to interviewer. |
-| D17 | Testing | **`httptest` mock inference in CI** | Planned (Step 8+) | No live API spend in CI; deterministic tests for 429/500/400 paths. |
+| D17 | Testing | **`httptest` mock inference in CI** | Implemented (Step 8) | No live API spend in CI; deterministic tests for 429/500/400 paths. |
 | D18 | Worker concurrency | **Semaphore / bounded channel (`MAX_WORKERS=10`)** | Planned (Step 9) | Caps parallel DO calls; primary backpressure knob alongside retry backoff. |
 | D19 | Chunk size | **`CHUNK_SIZE=50` (config)** | Planned | Logical grouping for future chunk files / Spaces extension; default aligns with TODO plan. |
 | D20 | Partial failures | **Job status `partial` + per-row `error` in results** | Planned | Spec requires isolated row failures. Confirm with interviewer (see open questions). |
@@ -184,7 +184,8 @@ Considered: `cenkalti/backoff`, `hashicorp/go-retryablehttp`.
 | 5 | Streaming ingest | `0fb4860` | D4, D11 |
 | 6 | Disk job store | `175596b` | D9, D10 |
 | 7 | Backoff helper | `83d1f05` | D12, D13, D14 |
-| 8–15 | Inference, pool, runner, API, E2E, docs | *planned* | D17–D21 |
+| 8 | DO inference client | *this commit* | D2, D17 |
+| 9–15 | Pool, runner, API, E2E, docs | *planned* | D18–D21 |
 
 ---
 
