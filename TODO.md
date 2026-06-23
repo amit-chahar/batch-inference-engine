@@ -48,7 +48,8 @@ Go implementation plan for the DigitalOcean interview.
 | 8 — DO inference client | ✅ Done | `d275210` |
 | 9 — Bounded worker pool | ✅ Done | `5a361e9` |
 | 10 — Background job runner | ✅ Done | `edb4e58` |
-| 11–15 — API, E2E, docs | 🟡 Partial | submit/status/download wired; E2E + docs polish remain |
+| 11–14 — API + E2E | ✅ Done | submit/status/download + httptest E2E |
+| 15 — Docs polish | 🟡 Partial | architecture draft; README scaling table TBD |
 | 16–17 — Extensions | ⬜ Optional | — |
 
 Also see `DECISIONS.md` for rationale behind each choice.
@@ -262,8 +263,8 @@ Also see `DECISIONS.md` for rationale behind each choice.
 ### Step 14 — Full E2E integration test
 **Goal:** CI-provable full lifecycle.
 
-- [ ] `internal/api/handlers_test.go`
-- [ ] Flow: submit → poll until done → download → assert result count
+- [x] `internal/api/handlers_test.go`
+- [x] Flow: submit → poll until done → download → assert result count
 
 **Commit:** `test: end-to-end job lifecycle integration test`  
 **Verify:** `go test ./... -race -cover` all green.

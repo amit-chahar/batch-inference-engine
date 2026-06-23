@@ -4,16 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/amit-chahar/batch-inference-engine/internal/job"
 	"github.com/amit-chahar/batch-inference-engine/internal/runner"
+	"github.com/amit-chahar/batch-inference-engine/internal/worker"
 )
 
 func TestHealth(t *testing.T) {
@@ -40,87 +44,160 @@ func TestHealth(t *testing.T) {
 	}
 }
 
-func TestSubmitStatusDownloadFlow(t *testing.T) {
-	inputPath := filepath.Join(t.TempDir(), "batch.jsonl")
-	content := strings.Join([]string{
-		`{"id":"prompt-0000","prompt":"First prompt","metadata":{"topic":"test"}}`,
-		`{"id":"prompt-0001","prompt":"Second prompt"}`,
-		"",
-	}, "\n")
-	if err := os.WriteFile(inputPath, []byte(content), 0o644); err != nil {
-		t.Fatalf("write input: %v", err)
-	}
+// TestE2EJobLifecycle exercises the full HTTP stack: submit → poll → download.
+// Inference is served by an httptest mock in the same shape as DO Serverless Inference.
+func TestE2EJobLifecycle(t *testing.T) {
+	const itemCount = 5
+	var inferenceCalls atomic.Int32
+
+	mockInference := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inferenceCalls.Add(1)
+
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-key" {
+			t.Errorf("authorization = %q, want Bearer test-key", auth)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var req struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Messages) == 0 {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"role":    "assistant",
+					"content": "mock: " + req.Messages[0].Content,
+				}},
+			},
+		})
+	}))
+	t.Cleanup(mockInference.Close)
 
 	store := job.NewStore(t.TempDir())
-	run := runner.New(store, apiStubCompleter{}, 2, 4)
-	handler := NewHandlerWithRunner("0.1.0", store, run)
+	inferenceClient := worker.NewInferenceClient(worker.InferenceOptions{
+		HTTPClient: mockInference.Client(),
+		APIURL:     mockInference.URL,
+		APIKey:     "test-key",
+		Model:      "test-model",
+		MaxRetries: 2,
+		Backoff:    worker.NewBackoffWithRand(time.Millisecond, 10*time.Millisecond, rand.New(rand.NewSource(1))),
+		Sleep:      func(time.Duration) {},
+	})
+	batchRunner := runner.New(store, inferenceClient, 2, 4)
+	router := NewRouter(NewHandlerWithRunner("0.1.0", store, batchRunner))
+
+	inputPath := writeBatchJSONL(t, itemCount)
+	submitted := submitJob(t, router, inputPath)
+	if submitted.TotalItems != itemCount {
+		t.Fatalf("total_items = %d, want %d", submitted.TotalItems, itemCount)
+	}
+
+	status := pollUntilTerminal(t, router, submitted.JobID)
+	if status.Status != job.JobStatusCompleted {
+		t.Fatalf("job status = %q, want completed", status.Status)
+	}
+	if status.TotalItems != itemCount || status.CompletedItems != itemCount || status.FailedItems != 0 {
+		t.Fatalf("status counts = completed:%d failed:%d total:%d", status.CompletedItems, status.FailedItems, status.TotalItems)
+	}
+	if status.ProgressPercent != 100 {
+		t.Fatalf("progress_percent = %v, want 100", status.ProgressPercent)
+	}
+
+	results := downloadResults(t, router, submitted.JobID)
+	if len(results) != itemCount {
+		t.Fatalf("download result count = %d, want %d", len(results), itemCount)
+	}
+	for i, result := range results {
+		if result.Error != nil {
+			t.Fatalf("result[%d] error = %q", i, *result.Error)
+		}
+		if result.Response == nil || !strings.HasPrefix(*result.Response, "mock: ") {
+			t.Fatalf("result[%d] response = %v, want mock prefix", i, result.Response)
+		}
+	}
+
+	if got := int(inferenceCalls.Load()); got != itemCount {
+		t.Fatalf("inference calls = %d, want %d", got, itemCount)
+	}
+}
+
+func TestDownloadReturns409WhileJobRunning(t *testing.T) {
+	store := job.NewStore(t.TempDir())
+	meta, err := store.CreateJob(2)
+	if err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+	if err := store.SetStatus(meta.JobID, job.JobStatusRunning); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+
+	handler := NewHandlerWithRunner("0.1.0", store, runner.New(store, blockedCompleter{}, 1, 2))
 	router := NewRouter(handler)
 
+	req := httptest.NewRequest(http.MethodGet, "/job/"+meta.JobID+"/download", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+}
+
+type blockedCompleter struct{}
+
+func (blockedCompleter) Complete(ctx context.Context, item job.PromptItem) job.PromptResult {
+	<-ctx.Done()
+	return job.PromptResult{ID: item.ID, Prompt: item.Prompt}
+}
+
+func writeBatchJSONL(t *testing.T, itemCount int) string {
+	t.Helper()
+
+	lines := make([]string, itemCount)
+	for i := range itemCount {
+		lines[i] = fmt.Sprintf(`{"id":"prompt-%04d","prompt":"Prompt %d","metadata":{"index":%d}}`, i, i, i)
+	}
+
+	path := filepath.Join(t.TempDir(), "batch.jsonl")
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	return path
+}
+
+func submitJob(t *testing.T, router http.Handler, inputPath string) submitResponse {
+	t.Helper()
+
 	body := []byte(`{"input_file":` + strconvQuote(inputPath) + `}`)
-	submitReq := httptest.NewRequest(http.MethodPost, "/job/submit", bytes.NewReader(body))
-	submitRec := httptest.NewRecorder()
-	router.ServeHTTP(submitRec, submitReq)
-	if submitRec.Code != http.StatusAccepted {
-		t.Fatalf("submit status = %d, body = %s", submitRec.Code, submitRec.Body.String())
+	req := httptest.NewRequest(http.MethodPost, "/job/submit", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("submit status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 
 	var submitted submitResponse
-	if err := json.NewDecoder(submitRec.Body).Decode(&submitted); err != nil {
+	if err := json.NewDecoder(rec.Body).Decode(&submitted); err != nil {
 		t.Fatalf("decode submit: %v", err)
 	}
 	if submitted.JobID == "" {
 		t.Fatal("expected job id")
 	}
-	if submitted.TotalItems != 2 {
-		t.Fatalf("total_items = %d, want 2", submitted.TotalItems)
-	}
-
-	status := waitForTerminalStatus(t, router, submitted.JobID)
-	if status.Status != job.JobStatusCompleted {
-		t.Fatalf("job status = %q, want completed", status.Status)
-	}
-	if status.TotalItems != 2 || status.CompletedItems != 2 || status.FailedItems != 0 {
-		t.Fatalf("status counts = completed:%d failed:%d total:%d", status.CompletedItems, status.FailedItems, status.TotalItems)
-	}
-
-	downloadReq := httptest.NewRequest(http.MethodGet, "/job/"+submitted.JobID+"/download", nil)
-	downloadRec := httptest.NewRecorder()
-	router.ServeHTTP(downloadRec, downloadReq)
-	if downloadRec.Code != http.StatusOK {
-		t.Fatalf("download status = %d, body = %s", downloadRec.Code, downloadRec.Body.String())
-	}
-	if ct := downloadRec.Header().Get("Content-Type"); ct != "application/json" {
-		t.Fatalf("content-type = %q, want application/json", ct)
-	}
-
-	var results []job.PromptResult
-	if err := json.NewDecoder(downloadRec.Body).Decode(&results); err != nil {
-		t.Fatalf("decode download JSON array: %v, body = %s", err, downloadRec.Body.String())
-	}
-	if len(results) != 2 {
-		t.Fatalf("download result count = %d, want 2", len(results))
-	}
-	if results[0].ID != "prompt-0000" {
-		t.Fatalf("first result id = %q, want prompt-0000", results[0].ID)
-	}
+	return submitted
 }
 
-type apiStubCompleter struct{}
-
-func (apiStubCompleter) Complete(_ context.Context, item job.PromptItem) job.PromptResult {
-	response := "Processed prompt " + item.ID
-	return job.PromptResult{
-		ID:       item.ID,
-		Prompt:   item.Prompt,
-		Response: &response,
-		Metadata: item.Metadata,
-	}
-}
-
-func waitForTerminalStatus(t *testing.T, router http.Handler, jobID string) statusResponse {
+func pollUntilTerminal(t *testing.T, router http.Handler, jobID string) statusResponse {
 	t.Helper()
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		req := httptest.NewRequest(http.MethodGet, "/job/"+jobID+"/status", nil)
 		rec := httptest.NewRecorder()
@@ -141,6 +218,26 @@ func waitForTerminalStatus(t *testing.T, router http.Handler, jobID string) stat
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func downloadResults(t *testing.T, router http.Handler, jobID string) []job.PromptResult {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, "/job/"+jobID+"/download", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("download status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", ct)
+	}
+
+	var results []job.PromptResult
+	if err := json.NewDecoder(rec.Body).Decode(&results); err != nil {
+		t.Fatalf("decode download JSON array: %v, body = %s", err, rec.Body.String())
+	}
+	return results
 }
 
 func strconvQuote(value string) string {
