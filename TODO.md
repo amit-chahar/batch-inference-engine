@@ -48,7 +48,7 @@ Go implementation plan for the DigitalOcean interview.
 | 8 — DO inference client | ✅ Done | `d275210` |
 | 9 — Bounded worker pool | ✅ Done | `5a361e9` |
 | 10 — Background job runner | ✅ Done | `edb4e58` |
-| 11–15 — API, E2E, docs | 🟡 Partial | submit/status wired; download JSONL (Step 13 merge TBD) |
+| 11–15 — API, E2E, docs | 🟡 Partial | submit/status/download wired; E2E + docs polish remain |
 | 16–17 — Extensions | ⬜ Optional | — |
 
 Also see `DECISIONS.md` for rationale behind each choice.
@@ -250,9 +250,9 @@ Also see `DECISIONS.md` for rationale behind each choice.
 ### Step 13 — GET /job/{id}/download
 **Goal:** Stream merged JSON array without OOM.
 
-- [ ] Write `[`, stream each `results.jsonl` line with commas, write `]`
-- [ ] Never `json.Marshal` the full result slice
-- [ ] Optional: 409 if job still running
+- [x] Write `[`, stream each `results.jsonl` line with commas, write `]`
+- [x] Never `json.Marshal` the full result slice
+- [x] Optional: 409 if job still running
 
 **Commit:** `feat: GET /job/{id}/download streams merged results`  
 **Verify:** Download is valid JSON array.

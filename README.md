@@ -42,10 +42,10 @@ curl -X POST http://localhost:8080/job/submit \
 curl http://localhost:8080/job/{job_id}/status
 ```
 
-### Download results (JSONL today; JSON array merge in Step 13)
+### Download results (streamed JSON array)
 
 ```bash
-curl http://localhost:8080/job/{job_id}/download -o results.jsonl
+curl http://localhost:8080/job/{job_id}/download -o results.json
 ```
 
 ## Sample input

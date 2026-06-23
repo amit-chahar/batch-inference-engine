@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -126,8 +127,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Download streams the job's JSONL result file.
-// Step 13 will merge lines into a streamed JSON array; currently returns raw JSONL.
+// Download streams merged job results as a JSON array without loading all rows into memory.
 func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	meta, err := h.store.GetMeta(jobID)
@@ -154,8 +154,19 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/x-ndjson")
-	http.ServeFile(w, r, path)
+	file, err := os.Open(path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "open results"})
+		return
+	}
+	defer file.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := job.WriteResultsArray(w, file); err != nil {
+		// Headers may already be sent; client may see truncated JSON.
+		return
+	}
 }
 
 // stubNoopCompleter satisfies handler construction in tests that only hit /health.

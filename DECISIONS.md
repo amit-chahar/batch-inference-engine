@@ -55,7 +55,7 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | D18 | Worker concurrency | **Fixed worker goroutines (`MAX_WORKERS`)** | Implemented (Step 9) | Shared input channel + N workers; caps parallel DO calls alongside retry backoff. |
 | D19 | Chunk size | **`CHUNK_SIZE=50` (config)** | Planned | Logical grouping for future chunk files / Spaces extension; default aligns with TODO plan. |
 | D20 | Partial failures | **Job status `partial` + per-row `error` in results** | Planned | Spec requires isolated row failures. Confirm with interviewer (see open questions). |
-| D21 | Download | **Stream merge from `results.jsonl`** | Planned | Never `json.Marshal` full result slice — O(1) memory at download time. |
+| D21 | Download | **Stream merge from `results.jsonl`** | Implemented | Never `json.Marshal` full result slice — O(1) memory at download time. |
 | D22 | DO Spaces extension | **Optional (P2)** | Not started | Spec extension for crash-safe chunk spill; only if core path done early. |
 | D23 | Webhook extension | **Optional (P2)** | Not started | Spec extension; defer until P0/P1 complete. |
 | D24 | Model name | **`llama3.3-70b-instruct` in `.env.example`** | Config default | Placeholder until key scope confirmed; trivial to change via env. |

@@ -89,12 +89,19 @@ func TestSubmitStatusDownloadFlow(t *testing.T) {
 	if downloadRec.Code != http.StatusOK {
 		t.Fatalf("download status = %d, body = %s", downloadRec.Code, downloadRec.Body.String())
 	}
-	lines := strings.Split(strings.TrimSpace(downloadRec.Body.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("download result lines = %d, want 2", len(lines))
+	if ct := downloadRec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", ct)
 	}
-	if !strings.Contains(downloadRec.Body.String(), "prompt-0000") {
-		t.Fatalf("download body missing prompt id: %s", downloadRec.Body.String())
+
+	var results []job.PromptResult
+	if err := json.NewDecoder(downloadRec.Body).Decode(&results); err != nil {
+		t.Fatalf("decode download JSON array: %v, body = %s", err, downloadRec.Body.String())
+	}
+	if len(results) != 2 {
+		t.Fatalf("download result count = %d, want 2", len(results))
+	}
+	if results[0].ID != "prompt-0000" {
+		t.Fatalf("first result id = %q, want prompt-0000", results[0].ID)
 	}
 }
 
