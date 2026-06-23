@@ -34,6 +34,27 @@ Go implementation plan for the DigitalOcean interview.
 
 ---
 
+## Progress summary
+
+| Step | Status | Commit |
+|------|--------|--------|
+| 1 — Repo bootstrap | ✅ Done | `1ecba51`, CI restored `37d3e3d` |
+| 2 — Config package | ✅ Done | `ce8cb42` |
+| 3 — HTTP skeleton + health | ✅ Done | `77a6f11` |
+| 4 — Sample batch (JSONL) | ✅ Done | `25c6fe7` |
+| 5 — Streaming ingest | ✅ Done | `0fb4860` |
+| 6 — Disk job store | ✅ Done | `175596b` |
+| 7 — Backoff helper | ✅ Done | `83d1f05` |
+| 8 — DO inference client | ✅ Done | `d275210` |
+| 9 — Bounded worker pool | ✅ Done | `5a361e9` |
+| 10 — Background job runner | ⬜ Next | — |
+| 11–15 — API, E2E, docs | ⬜ Pending | — |
+| 16–17 — Extensions | ⬜ Optional | — |
+
+Also see `DECISIONS.md` for rationale behind each choice.
+
+---
+
 ## Core build steps
 
 ### 3-hour priority guardrails
@@ -53,8 +74,8 @@ Go implementation plan for the DigitalOcean interview.
 - [x] `Makefile` (`make test`, `make build`, `make run`)
 - [x] `README.md` stub
 - [x] Initial commit + push to GitHub
-- [ ] Re-add `.github/workflows/ci.yml` (`go test ./...`, `go build ./cmd/server`)
-- [ ] Confirm `go test ./...` and `go build ./cmd/server` pass locally before pushing
+- [x] Re-add `.github/workflows/ci.yml` (`go test ./...`, `go build ./cmd/server`)
+- [x] Confirm `go test ./...` and `go build ./cmd/server` pass locally before pushing
 
 **Commit:** `chore: init Go module, CI skeleton, and project scaffolding`  
 **Verify:** CI green on GitHub after push.
@@ -64,8 +85,8 @@ Go implementation plan for the DigitalOcean interview.
 ### Step 2 — Config package
 **Goal:** All tunables in one place.
 
-- [ ] `internal/config/config.go` — load from env
-- [ ] Update `.env.example` for DO Serverless Inference:
+- [x] `internal/config/config.go` — load from env
+- [x] Update `.env.example` for DO Serverless Inference:
   ```
   DO_MODEL_ACCESS_KEY=
   INFERENCE_API_URL=https://inference.do-ai.run/v1/chat/completions
@@ -78,7 +99,7 @@ Go implementation plan for the DigitalOcean interview.
   JOBS_DIR=data/jobs
   PORT=8080
   ```
-- [ ] `internal/config/config_test.go`
+- [x] `internal/config/config_test.go`
 
 **Commit:** `feat: add env-based configuration for DO inference and worker pool`  
 **Verify:** `go test ./internal/config/...`
@@ -89,10 +110,10 @@ Go implementation plan for the DigitalOcean interview.
 **Goal:** Server starts; JSON health check.
 
 - [x] `cmd/server/main.go` — basic health (stdlib mux)
-- [ ] Refactor to `internal/api/router.go` (chi router)
-- [ ] `internal/api/handlers.go` — `Health` handler
-- [ ] `internal/job/types.go` — `JobStatus`, `PromptItem`, `PromptResult`, `JobMeta`
-- [ ] Keep this step compile-only; no background processing yet
+- [x] Refactor to `internal/api/router.go` (chi router)
+- [x] `internal/api/handlers.go` — `Health` handler
+- [x] `internal/job/types.go` — `JobStatus`, `PromptItem`, `PromptResult`, `JobMeta`
+- [x] Keep this step compile-only; no background processing yet
 
 **Commit:** `feat: add chi router, health endpoint, and job domain types`  
 **Verify:** `curl localhost:8080/health` → `{"status":"ok"}`
@@ -102,9 +123,9 @@ Go implementation plan for the DigitalOcean interview.
 ### Step 4 — Sample batch file
 **Goal:** 1,000-line JSONL input in repo (one prompt per line).
 
-- [ ] Regenerate as **JSONL** (not JSON array) — exactly **1000 lines**
-- [ ] `scripts/generate_batch.go` — write one JSON object per line
-- [ ] `sample_batch.jsonl` (or `sample_batch.json` with JSONL content — confirm filename with interviewer)
+- [x] Regenerate as **JSONL** (not JSON array) — exactly **1000 lines**
+- [x] `scripts/generate_batch.go` — write one JSON object per line
+- [x] `sample_batch.jsonl` (or `sample_batch.json` with JSONL content — confirm filename with interviewer)
 - [x] ~~`sample_batch.json` (JSON array)~~ — **replace** with 1000-line JSONL format
 
 **Per-line schema:**
@@ -120,11 +141,11 @@ Go implementation plan for the DigitalOcean interview.
 ### Step 5 — Streaming ingest reader
 **Goal:** Parse JSONL line-by-line without loading full file into memory.
 
-- [ ] `internal/ingest/reader.go` — `StreamItems(path) (<-chan PromptItem, <-chan error)`
-- [ ] `internal/ingest/reader_test.go`
-- [ ] Technique: `bufio.Scanner` → `json.Unmarshal` each non-empty line
-- [ ] Skip/malformed lines → record as row error, continue (don't abort job)
-- [ ] Add a README note: scanner/channel path keeps input memory O(1) for 500K rows
+- [x] `internal/ingest/reader.go` — `StreamItems(path) (<-chan PromptItem, <-chan error)`
+- [x] `internal/ingest/reader_test.go`
+- [x] Technique: `bufio.Scanner` → `json.Unmarshal` each non-empty line
+- [x] Skip/malformed lines → record as row error, continue (don't abort job)
+- [x] Add a README note: scanner/channel path keeps input memory O(1) for 500K rows
 
 **Commit:** `feat: stream-parse JSONL batch file one line at a time`  
 **Verify:** Tests pass with 10-line fixture; bad line returns error but doesn't panic.
@@ -134,16 +155,16 @@ Go implementation plan for the DigitalOcean interview.
 ### Step 6 — Disk job store
 **Goal:** Persist job metadata and append-only results.
 
-- [ ] `internal/job/store.go`
-- [ ] `internal/job/store_test.go`
-- [ ] `data/jobs/.gitkeep`
-- [ ] Layout per job:
+- [x] `internal/job/store.go`
+- [x] `internal/job/store_test.go`
+- [x] `data/jobs/.gitkeep`
+- [x] Layout per job:
   ```
   data/jobs/{uuid}/
     meta.json       # status, total, completed, failed, created_at
     results.jsonl   # one PromptResult JSON per line
   ```
-- [ ] API: `CreateJob`, `GetMeta`, `IncrementCompleted`, `IncrementFailed`, `AppendResult`, `SetStatus`
+- [x] API: `CreateJob`, `GetMeta`, `IncrementCompleted`, `IncrementFailed`, `AppendResult`, `SetStatus`
 
 **Commit:** `feat: disk-backed job store with meta.json and results.jsonl`  
 **Verify:** Unit tests for create, counters, concurrent appends.
@@ -153,11 +174,11 @@ Go implementation plan for the DigitalOcean interview.
 ### Step 7 — Backoff helper
 **Goal:** Pure, testable retry delay logic.
 
-- [ ] `internal/worker/backoff.go`
-- [ ] `internal/worker/backoff_test.go`
-- [ ] Retry on: 429, 502, 503, 504
-- [ ] Delay: `min(maxBackoff, initial * 2^attempt) + jitter(0..25%)`
-- [ ] Honor `Retry-After` header when present
+- [x] `internal/worker/backoff.go`
+- [x] `internal/worker/backoff_test.go`
+- [x] Retry on: 429, 500, 502, 503, 504
+- [x] Delay: `min(maxBackoff, initial * 2^attempt) + jitter(0..25%)`
+- [x] Honor `Retry-After` header when present
 
 **Commit:** `feat: exponential backoff with jitter for rate-limit retries`  
 **Verify:** Table-driven tests for attempt 0/1/2, cap, jitter bounds.
@@ -167,9 +188,9 @@ Go implementation plan for the DigitalOcean interview.
 ### Step 8 — DO inference client
 **Goal:** HTTP client calling DO chat completions with retry.
 
-- [ ] `internal/worker/inference.go`
-- [ ] `internal/worker/inference_test.go` (httptest mock — no live key in CI)
-- [ ] Target: `POST https://inference.do-ai.run/v1/chat/completions`
+- [x] `internal/worker/inference.go`
+- [x] `internal/worker/inference_test.go` (httptest mock — no live key in CI)
+- [x] Target: `POST https://inference.do-ai.run/v1/chat/completions`
 
 **Commit:** `feat: DO serverless inference client with retry on 429/5xx`  
 **Verify:** Mock — 429 then 200 succeeds; 400 fails immediately; 500 exhausts retries.
@@ -179,9 +200,9 @@ Go implementation plan for the DigitalOcean interview.
 ### Step 9 — Bounded worker pool
 **Goal:** Semaphore-limited concurrent inference.
 
-- [ ] `internal/worker/pool.go`
-- [ ] `internal/worker/pool_test.go`
-- [ ] Pattern: `sem := make(chan struct{}, maxWorkers)`
+- [x] `internal/worker/pool.go`
+- [x] `internal/worker/pool_test.go`
+- [x] Pattern: fixed worker goroutines on shared channel (caps concurrency at `MAX_WORKERS`)
 
 **Commit:** `feat: bounded goroutine pool for concurrent inference`  
 **Verify:** Test proves concurrency never exceeds `MAX_WORKERS`.
@@ -255,7 +276,7 @@ Go implementation plan for the DigitalOcean interview.
 - [x] `docs/architecture.md` (draft exists — update for final design)
 - [ ] `README.md` — DO key setup, curl examples, scaling table (1K → 500K)
 - [ ] Mermaid diagram: ingestion → scatter → backpressure → gather
-- [ ] Explicitly explain JSONL clarification vs original `sample_batch.json` array wording
+- [ ] Explicitly explain JSONL clarification vs original `sample_batch.json` array wording *(partial — see README Sample input section)*
 - [ ] Include ceilings: worker count, channel buffer, retry cap, result file size/rotation
 
 **Commit:** `docs: README quickstart and architecture diagram`  
