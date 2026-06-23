@@ -24,6 +24,11 @@ go.work.sum
 data/jobs/*
 !data/jobs/.gitkeep
 
+# Demo artifacts
+scripts/demo/.last-job-id
+demo_results.json
+full_results.json
+
 # IDE / OS
 .idea/
 .vscode/

@@ -83,6 +83,44 @@ jq length results.json   # should match total_items from status
 
 Download returns **409 Conflict** while the job is still `pending` or `running`.
 
+## Live demo scripts
+
+Runnable shell scripts for interview walkthrough (requires server + `.env` key):
+
+**Terminal 1 — start server**
+
+```bash
+scripts/start-server.sh
+```
+
+**Terminal 2 — step-by-step**
+
+```bash
+scripts/demo/01-health.sh
+scripts/demo/02-submit.sh              # default: demo_live.jsonl (3 prompts)
+scripts/demo/03-status.sh              # uses last job id
+scripts/demo/04-poll.sh                  # poll until completed/partial/failed
+scripts/demo/05-download.sh              # writes demo_results.json
+```
+
+**Or run the small batch end-to-end**
+
+```bash
+scripts/demo/run-small.sh
+```
+
+**Full 1K batch** (long-running — 30–60+ min):
+
+```bash
+scripts/demo/run-full.sh
+scripts/demo/04-poll.sh
+scripts/demo/05-download.sh "" full_results.json
+```
+
+Submit saves the latest `job_id` to `scripts/demo/.last-job-id` so status/poll/download work without passing the id each time.
+
+Override server URL: `BASE_URL=http://localhost:8080 scripts/demo/01-health.sh`
+
 ## API
 
 | Method | Path | Description |
