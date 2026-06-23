@@ -1,5 +1,5 @@
 // Package api exposes the REST surface for batch job submission, status, and download.
-// Handlers stay thin; background processing lives in internal/job/runner.
+// Handlers stay thin; background processing lives in internal/runner.
 package api
 
 import (
@@ -22,8 +22,7 @@ type Handler struct {
 	runner  *runner.Runner
 }
 
-// NewHandler constructs an API handler with default store and no background runner.
-// Prefer NewHandlerWithRunner for production wiring.
+// NewHandler constructs an API handler with default store and a noop runner (health-only tests).
 func NewHandler(version string) *Handler {
 	store := job.NewStore("data/jobs")
 	return NewHandlerWithRunner(version, store, runner.New(store, stubNoopCompleter{}, 1, 2))
@@ -128,8 +127,23 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 }
 
 // Download streams the job's JSONL result file.
+// Step 13 will merge lines into a streamed JSON array; currently returns raw JSONL.
 func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
+	meta, err := h.store.GetMeta(jobID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err == job.ErrJobNotFound {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	if meta.Status == job.JobStatusPending || meta.Status == job.JobStatusRunning {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "job still running"})
+		return
+	}
+
 	path, err := h.store.ResultsPath(jobID)
 	if err != nil {
 		status := http.StatusInternalServerError

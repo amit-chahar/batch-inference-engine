@@ -9,14 +9,14 @@ Built in **Go** for the DigitalOcean batch inference interview.
 ### Prerequisites
 
 - Go 1.22+
-- An inference API key (OpenRouter, Together, Groq, etc.)
+- DigitalOcean Model Access Key (or any OpenAI-compatible inference key)
 
 ### Setup
 
 ```bash
 cd batch-inference-engine
 cp .env.example .env
-# Edit .env and set INFERENCE_API_KEY
+# Edit .env and set DO_MODEL_ACCESS_KEY
 
 make build
 make run
@@ -25,15 +25,27 @@ make run
 ### Health check
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8080/health
 ```
 
-### Submit a batch job (coming soon)
+### Submit a batch job
 
 ```bash
-curl -X POST http://localhost:8000/job/submit \
+curl -X POST http://localhost:8080/job/submit \
   -H "Content-Type: application/json" \
   -d '{"input_file": "sample_batch.jsonl"}'
+```
+
+### Check status
+
+```bash
+curl http://localhost:8080/job/{job_id}/status
+```
+
+### Download results (JSONL today; JSON array merge in Step 13)
+
+```bash
+curl http://localhost:8080/job/{job_id}/download -o results.jsonl
 ```
 
 ## Sample input
