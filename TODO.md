@@ -1,7 +1,7 @@
 # Batch Inference Engine — TODO
 
 Go implementation plan for the DigitalOcean interview.  
-**Workflow:** complete one step → `go test ./...` → commit → push → review → next step.
+**Workflow:** complete one small step → `go test ./...` → commit → push → review → next step.
 
 > **Secrets:** Store the DO key in `.env` only (gitignored). Never commit `.env` or paste keys into source code, tests, or README.
 
@@ -15,6 +15,7 @@ Go implementation plan for the DigitalOcean interview.
 | **Auth** | Interviewer will provide a **Model Access Key** (Bearer token). Use mocks in tests/CI for now; plug in live key for manual demo. |
 | **Architecture** | **Build your own** scatter-gather worker pool + backoff. Do **NOT** wrap DO's managed Batch Inference API (`/v1/batches/*`). |
 | **Input format** | **JSONL file, exactly 1000 lines** — one JSON object per line. Local workspace file path on submit. |
+| **Spec note** | Original prompt mentions `sample_batch.json` as an array; interviewer clarified JSONL. Document this in README so reviewers see the intentional choice. |
 | **Testing strategy** | `httptest` mock inference server in CI; live DO key for manual demo only. |
 
 **Example input line:**
@@ -35,14 +36,25 @@ Go implementation plan for the DigitalOcean interview.
 
 ## Core build steps
 
+### 3-hour priority guardrails
+
+- **P0 must ship:** repo/CI, health, submit, background runner, bounded workers, retry/backoff, status, download, README + architecture diagram.
+- **P1 should ship:** disk-backed `meta.json`/`results.jsonl`, streaming ingest/download, full E2E test with `httptest`.
+- **P2 only if ahead:** DO Spaces chunk upload, webhook callback, extra polish.
+- Keep the first reviewable push tiny: scaffolding + CI + a compiling server. Do not start live inference until the HTTP skeleton and job model are committed.
+- Treat memory scaling as a first-class requirement: no full result slice in memory; results append to disk and downloads stream from disk.
+
+---
+
 ### Step 1 — Repo bootstrap
-**Goal:** Pushable repo with scaffolding.
+**Goal:** First reviewable push with minimal scaffolding and CI.
 
 - [x] `.gitignore` (`bin/`, `.env`, `data/jobs/*`)
 - [x] `Makefile` (`make test`, `make build`, `make run`)
 - [x] `README.md` stub
 - [x] Initial commit + push to GitHub
 - [ ] Re-add `.github/workflows/ci.yml` (`go test ./...`, `go build ./cmd/server`)
+- [ ] Confirm `go test ./...` and `go build ./cmd/server` pass locally before pushing
 
 **Commit:** `chore: init Go module, CI skeleton, and project scaffolding`  
 **Verify:** CI green on GitHub after push.
@@ -80,6 +92,7 @@ Go implementation plan for the DigitalOcean interview.
 - [ ] Refactor to `internal/api/router.go` (chi router)
 - [ ] `internal/api/handlers.go` — `Health` handler
 - [ ] `internal/job/types.go` — `JobStatus`, `PromptItem`, `PromptResult`, `JobMeta`
+- [ ] Keep this step compile-only; no background processing yet
 
 **Commit:** `feat: add chi router, health endpoint, and job domain types`  
 **Verify:** `curl localhost:8080/health` → `{"status":"ok"}`
@@ -111,6 +124,7 @@ Go implementation plan for the DigitalOcean interview.
 - [ ] `internal/ingest/reader_test.go`
 - [ ] Technique: `bufio.Scanner` → `json.Unmarshal` each non-empty line
 - [ ] Skip/malformed lines → record as row error, continue (don't abort job)
+- [ ] Add a README note: scanner/channel path keeps input memory O(1) for 500K rows
 
 **Commit:** `feat: stream-parse JSONL batch file one line at a time`  
 **Verify:** Tests pass with 10-line fixture; bad line returns error but doesn't panic.
@@ -181,6 +195,8 @@ Go implementation plan for the DigitalOcean interview.
 - [ ] `internal/job/runner_test.go`
 - [ ] Flow: `Submit` → return UUID → `go Process(jobID)` → stream → pool → store
 - [ ] Final status: `completed` | `partial` | `failed`
+- [ ] Use a bounded item channel between ingest and workers so slow inference cannot grow memory unbounded
+- [ ] Runner must continue after row-level failures and write failed rows to `results.jsonl`
 
 **Commit:** `feat: background job runner with scatter-gather pipeline`  
 **Verify:** Integration test with mock inference processes 5 items end-to-end.
@@ -239,6 +255,8 @@ Go implementation plan for the DigitalOcean interview.
 - [x] `docs/architecture.md` (draft exists — update for final design)
 - [ ] `README.md` — DO key setup, curl examples, scaling table (1K → 500K)
 - [ ] Mermaid diagram: ingestion → scatter → backpressure → gather
+- [ ] Explicitly explain JSONL clarification vs original `sample_batch.json` array wording
+- [ ] Include ceilings: worker count, channel buffer, retry cap, result file size/rotation
 
 **Commit:** `docs: README quickstart and architecture diagram`  
 **Verify:** Follow README from clean checkout.
@@ -246,6 +264,8 @@ Go implementation plan for the DigitalOcean interview.
 ---
 
 ## Optional extensions (if ahead of schedule)
+
+Do not start these until Steps 1–15 are pushed and CI is green.
 
 ### Step 16 — DO Spaces chunk upload
 - [ ] `internal/storage/spaces.go` — S3-compatible upload

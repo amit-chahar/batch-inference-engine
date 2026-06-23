@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"encoding/json"
@@ -8,12 +8,12 @@ import (
 )
 
 func TestHealth(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", healthHandler)
+	handler := NewHandler("0.1.0")
+	router := NewRouter(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -26,7 +26,7 @@ func TestHealth(t *testing.T) {
 	if body["status"] != "ok" {
 		t.Fatalf("status = %q, want ok", body["status"])
 	}
-	if body["version"] == "" {
-		t.Fatal("expected version in health response")
+	if body["version"] != "0.1.0" {
+		t.Fatalf("version = %q, want 0.1.0", body["version"])
 	}
 }
