@@ -212,12 +212,12 @@ Also see `DECISIONS.md` for rationale behind each choice.
 ### Step 10 — Background job runner
 **Goal:** Wire ingest → pool → store; non-blocking from HTTP.
 
-- [ ] `internal/job/runner.go`
-- [ ] `internal/job/runner_test.go`
-- [ ] Flow: `Submit` → return UUID → `go Process(jobID)` → stream → pool → store
-- [ ] Final status: `completed` | `partial` | `failed`
-- [ ] Use a bounded item channel between ingest and workers so slow inference cannot grow memory unbounded
-- [ ] Runner must continue after row-level failures and write failed rows to `results.jsonl`
+- [x] `internal/runner/runner.go` (avoids job↔ingest import cycle)
+- [x] `internal/runner/runner_test.go`
+- [x] Flow: `Submit` → return UUID → `go Process(jobID)` → stream → pool → store
+- [x] Final status: `completed` | `partial` | `failed`
+- [x] Use a bounded item channel between ingest and workers so slow inference cannot grow memory unbounded
+- [x] Runner must continue after row-level failures and write failed rows to `results.jsonl`
 
 **Commit:** `feat: background job runner with scatter-gather pipeline`  
 **Verify:** Integration test with mock inference processes 5 items end-to-end.

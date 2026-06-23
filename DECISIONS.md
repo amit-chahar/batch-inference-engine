@@ -186,7 +186,7 @@ Considered: `cenkalti/backoff`, `hashicorp/go-retryablehttp`.
 | 7 | Backoff helper | `83d1f05` | D12, D13, D14 |
 | 8 | DO inference client | `d275210` | D2, D17 |
 | 9 | Bounded worker pool | *this commit* | D18 |
-| 10–15 | Runner, API, E2E, docs | *planned* | D19–D21 |
+| 10 | Background runner | *this commit* | D3 partial |
 
 ---
 

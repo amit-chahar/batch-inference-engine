@@ -128,6 +128,18 @@ func (s *Store) AppendResult(jobID string, result PromptResult) error {
 	return nil
 }
 
+// ResultsPath returns the persisted JSONL results path for a job.
+func (s *Store) ResultsPath(jobID string) (string, error) {
+	mu := s.lock(jobID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if _, err := s.readMetaLocked(jobID); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.jobDir(jobID), "results.jsonl"), nil
+}
+
 func (s *Store) updateMeta(jobID string, update func(*JobMeta)) error {
 	mu := s.lock(jobID)
 	mu.Lock()

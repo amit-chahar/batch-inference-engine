@@ -9,6 +9,9 @@ import (
 
 	"github.com/amit-chahar/batch-inference-engine/internal/api"
 	"github.com/amit-chahar/batch-inference-engine/internal/config"
+	"github.com/amit-chahar/batch-inference-engine/internal/job"
+	"github.com/amit-chahar/batch-inference-engine/internal/runner"
+	"github.com/amit-chahar/batch-inference-engine/internal/worker"
 )
 
 const version = "0.1.0"
@@ -17,7 +20,11 @@ func main() {
 	// All tunables (port, worker pool, DO inference URL/key) come from env/.env.
 	cfg := config.Load()
 
-	handler := api.NewHandler(version)
+	store := job.NewStore(cfg.JobsDir)
+	inferenceClient := worker.NewInferenceClientFromConfig(cfg)
+	runner := runner.New(store, inferenceClient, cfg.MaxWorkers, cfg.MaxWorkers*2)
+
+	handler := api.NewHandlerWithRunner(version, store, runner)
 	router := api.NewRouter(handler)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

@@ -18,7 +18,9 @@ func NewRouter(h *Handler) http.Handler {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/health", h.Health)
-	// Job routes (submit, status, download) are added in Steps 11–13.
+	r.Post("/job/submit", h.Submit)
+	r.Get("/job/{id}/status", h.Status)
+	r.Get("/job/{id}/download", h.Download)
 
 	return r
 }
