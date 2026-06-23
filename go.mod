@@ -1,3 +1,3 @@
-module github.com/batch-inference-engine/batch-inference-engine
+module github.com/amit-chahar/batch-inference-engine
 
 go 1.26.4
