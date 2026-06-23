@@ -49,7 +49,7 @@ Go implementation plan for the DigitalOcean interview.
 | 9 — Bounded worker pool | ✅ Done | `5a361e9` |
 | 10 — Background job runner | ✅ Done | `edb4e58` |
 | 11–14 — API + E2E | ✅ Done | submit/status/download + httptest E2E |
-| 15 — Docs polish | 🟡 Partial | architecture draft; README scaling table TBD |
+| 15 — Docs polish | ✅ Done | README + architecture diagram |
 | 16–17 — Extensions | ⬜ Optional | — |
 
 Also see `DECISIONS.md` for rationale behind each choice.
@@ -275,10 +275,10 @@ Also see `DECISIONS.md` for rationale behind each choice.
 **Goal:** Submission-ready docs.
 
 - [x] `docs/architecture.md` (draft exists — update for final design)
-- [ ] `README.md` — DO key setup, curl examples, scaling table (1K → 500K)
-- [ ] Mermaid diagram: ingestion → scatter → backpressure → gather
-- [ ] Explicitly explain JSONL clarification vs original `sample_batch.json` array wording *(partial — see README Sample input section)*
-- [ ] Include ceilings: worker count, channel buffer, retry cap, result file size/rotation
+- [x] `README.md` — DO key setup, curl examples, scaling table (1K → 500K)
+- [x] Mermaid diagram: ingestion → scatter → backpressure → gather
+- [x] Explicitly explain JSONL clarification vs original `sample_batch.json` array wording *(partial — see README Sample input section)*
+- [x] Include ceilings: worker count, channel buffer, retry cap, result file size/rotation
 
 **Commit:** `docs: README quickstart and architecture diagram`  
 **Verify:** Follow README from clean checkout.

@@ -2,75 +2,134 @@
 
 ## System overview
 
+Custom scatter-gather engine: the API accepts a job and returns immediately; a background runner streams JSONL input through a bounded channel into a fixed worker pool that calls DO Serverless Inference; results append to disk and download merges lazily into a JSON array.
+
 ```mermaid
 flowchart TB
-    subgraph ingestion["1. Batch File Ingestion"]
-        JSON["sample_batch.jsonl<br/>(1,000 lines)"]
+    subgraph ingestion["1. Ingestion"]
+        JSONL["sample_batch.jsonl<br/>(JSONL, 1K lines)"]
         Submit["POST /job/submit"]
-        JobID["Return Job ID immediately"]
-        JSON --> Submit --> JobID
+        JobID["202 Accepted → job_id"]
+        JSONL --> Submit --> JobID
     end
 
-    subgraph scatter["2. Scatter — Chunk & Fan-Out"]
-        Parser["Stream JSON parser"]
-        Chunker["Partition into chunks<br/>(default: 50 items/chunk)"]
-        Queue["Bounded work queue"]
-        Parser --> Chunker --> Queue
+    subgraph scatter["2. Scatter"]
+        Scanner["bufio.Scanner<br/>one line at a time"]
+        Bridge["Ingest bridge goroutine"]
+        Queue["Bounded channel<br/>buffer = MAX_WORKERS × 2"]
+        JobID --> Scanner
+        Scanner --> Bridge --> Queue
     end
 
-    subgraph pool["3. Worker Pool + Backpressure"]
+    subgraph pool["3. Worker pool + backpressure"]
         W1["Worker 1"]
         W2["Worker 2"]
         WN["Worker N<br/>(MAX_WORKERS)"]
         Queue --> W1 & W2 & WN
-        W1 & W2 & WN --> Backoff["Exponential backoff<br/>+ jitter on 429/5xx"]
-        Backoff --> Inference["Inference API<br/>(meta-llama-3-8b-instruct)"]
+        W1 & W2 & WN --> Backoff["Exponential backoff + jitter<br/>429 / 500 / 502 / 503 / 504"]
+        Backoff --> Inference["DO Serverless Inference<br/>POST /v1/chat/completions"]
     end
 
-    subgraph gather["4. Gather — Aggregate & Report"]
-        Results["Per-chunk result files"]
+    subgraph gather["4. Gather"]
+        Store["Append results.jsonl<br/>+ update meta.json counters"]
         Status["GET /job/{id}/status"]
-        Download["GET /job/{id}/download"]
-        Inference --> Results
-        Results --> Status & Download
+        Download["GET /job/{id}/download<br/>stream merge → JSON array"]
+        Inference --> Store
+        Store --> Status & Download
     end
-
-    JobID --> Parser
 ```
 
-## Component responsibilities
+## Request lifecycle
 
-| Component | Role |
-|-----------|------|
-| **API layer** | Accepts jobs, returns immediately, serves status/download |
-| **Job store** | Tracks job metadata, progress counters, chunk paths on disk |
-| **Scheduler** | Reads input file in streaming fashion, enqueues chunks |
-| **Worker pool** | Bounded concurrency; one HTTP call per prompt |
-| **Backoff handler** | Retries 429/502/503/504 with exponential backoff + jitter |
-| **Aggregator** | Writes chunk results to disk; merges on download |
+1. **Submit** — Count non-empty JSONL lines, create `data/jobs/{uuid}/meta.json` + empty `results.jsonl`, start `runner.ProcessAsync`.
+2. **Run** — Set status `running`; stream items into a bounded channel; worker pool calls `InferenceClient.Complete` per row; append each `PromptResult` to disk and increment counters.
+3. **Finalize** — Set status `completed`, `partial` (mix of row successes/failures), or `failed` (all rows failed).
+4. **Status** — Read `meta.json` only; O(1) memory.
+5. **Download** — Stream `results.jsonl` into `[` … `]` without loading all rows; reject with 409 if still `pending`/`running`.
 
-## Memory model (avoiding OOM at 500K items)
+## Component map
 
-1. **Input**: Use `ijson` or line-delimited streaming — never `json.load()` the full file.
-2. **Execution**: Only `CHUNK_SIZE` items in flight per worker batch; queue depth capped by `MAX_WORKERS`.
-3. **Output**: Each chunk writes to `data/jobs/{job_id}/chunk_{n}.jsonl`; download merges lazily.
-4. **Status**: Maintain `{completed, failed, total}` counters — O(1) memory regardless of dataset size.
+| Package / component | Role |
+|---------------------|------|
+| `internal/api` | Chi router; thin HTTP handlers |
+| `internal/config` | Env-based tunables |
+| `internal/ingest` | JSONL line scanner + line count |
+| `internal/job` | Domain types, disk store (`meta.json`, `results.jsonl`), download merge |
+| `internal/runner` | Background pipeline: ingest → channel → pool → store |
+| `internal/worker` | Bounded pool, DO inference client, backoff |
+| `cmd/server` | Wiring: config → store → client → runner → router |
 
-## Backpressure strategy
+On disk per job:
+
+```
+data/jobs/{job_id}/
+  meta.json       # status, counters, timestamps
+  results.jsonl   # one PromptResult JSON object per line (append-only)
+```
+
+## Backpressure and retries
+
+Implemented in `internal/worker/backoff.go` and `internal/worker/inference.go`:
 
 ```
 attempt = 0
-while attempt < MAX_RETRIES:
+while attempt <= MAX_RETRIES:
     response = POST inference
-    if response.ok: return result
-    if response.status in (429, 502, 503, 504):
-        sleep(min(MAX_BACKOFF, INITIAL_BACKOFF * 2**attempt) + random_jitter)
+    if response.ok: return row result
+    if status in (429, 500, 502, 503, 504):
+        sleep(min(MAX_BACKOFF, INITIAL_BACKOFF × 2^attempt) + jitter)
+        honor Retry-After when present
         attempt += 1
     else:
-        record permanent failure; break
+        record permanent row error; continue job
 ```
 
-## Future extensions
+Non-retryable 4xx (400, 401, …) become per-row errors; the batch continues unless persistence fails.
 
-- **DO Spaces streaming**: Flush each completed chunk to object storage for crash recovery.
-- **Webhooks**: Register `callback_url` on submit; POST completion payload when job finishes.
+## Operational ceilings
+
+| Concern | Default / limit | Notes |
+|---------|-----------------|-------|
+| Concurrent inference | `MAX_WORKERS=10` | Primary rate-limit lever |
+| Queue backpressure | Channel size `MAX_WORKERS × 2` | Ingest blocks when full |
+| Retries | `MAX_RETRIES=5` → up to 6 attempts | Per prompt row |
+| Inference HTTP timeout | 30 seconds | Per upstream call |
+| Backoff range | 1s – 60s + jitter | Configurable via env |
+| Result file | Single `results.jsonl` per job | No in-memory aggregation |
+| `CHUNK_SIZE=50` | Config only today | Reserved for Step 16 chunk/Spaces rotation |
+
+## Memory model
+
+Peak RAM is **O(MAX_WORKERS × average response size)**, not O(number of prompts).
+
+| Phase | Strategy | Implementation |
+|-------|----------|----------------|
+| **Input** | Stream one JSONL line at a time | `internal/ingest/reader.go` — never load full file |
+| **Execution** | Cap goroutines + bounded channel | `internal/worker/pool.go`, `internal/runner` |
+| **Output** | Append-only disk writes | `internal/job/store.go` |
+| **Download** | Stream merge to JSON array | `internal/job/stream.go` — no full-slice `json.Marshal` |
+| **Status** | Counter fields in `meta.json` | O(1) regardless of dataset size |
+
+## Scaling reference
+
+| Scale | Input | Execution | Output |
+|-------|-------|-----------|--------|
+| 1K | Line scanner | 10 workers | One `results.jsonl` |
+| 100K | Same | Same pool | Same file; future: rotate at `CHUNK_SIZE` |
+| 500K | Never load all lines | Bounded goroutines + channel | Stream merge on download |
+
+## Input format note
+
+Interview spec text described a JSON **array** file; clarified requirement is JSONL for ingest streaming. Download intentionally returns a JSON **array** for downstream consumers that expect aggregated output.
+
+## Future extensions (optional)
+
+- **DO Spaces** (`internal/storage/spaces.go`) — flush completed chunks to object storage; env: `SPACES_KEY`, `SPACES_SECRET`, `SPACES_BUCKET`, `SPACES_REGION`.
+- **Webhooks** — optional `callback_url` on submit; POST payload when job reaches terminal status.
+
+See `TODO.md` Steps 16–17.
+
+## External references
+
+- [Serverless Inference](https://docs.digitalocean.com/products/inference/how-to/use-serverless-inference/)
+- [Batch Inference API](https://docs.digitalocean.com/reference/api/reference/batch-inference/) (reference — not used for orchestration)
