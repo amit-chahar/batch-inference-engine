@@ -47,8 +47,8 @@ Go implementation plan for the DigitalOcean interview.
 | 7 — Backoff helper | ✅ Done | `83d1f05` |
 | 8 — DO inference client | ✅ Done | `d275210` |
 | 9 — Bounded worker pool | ✅ Done | `5a361e9` |
-| 10 — Background job runner | ⬜ Next | — |
-| 11–15 — API, E2E, docs | ⬜ Pending | — |
+| 10 — Background job runner | ✅ Done | `edb4e58` |
+| 11–15 — API, E2E, docs | 🟡 Partial | submit/status wired; download JSONL (Step 13 merge TBD) |
 | 16–17 — Extensions | ⬜ Optional | — |
 
 Also see `DECISIONS.md` for rationale behind each choice.
