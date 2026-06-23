@@ -52,7 +52,7 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | D15 | CI/CD | **GitHub Actions** (`go vet`, `go test -race`, `go build`) | Implemented | Spec requirement. Temporarily removed during billing issue, restored once fixed. |
 | D16 | Commit strategy | **Small steps → test → commit → push** | Ongoing | Frequent reviewable diffs; easier to explain timeline to interviewer. |
 | D17 | Testing | **`httptest` mock inference in CI** | Implemented (Step 8) | No live API spend in CI; deterministic tests for 429/500/400 paths. |
-| D18 | Worker concurrency | **Semaphore / bounded channel (`MAX_WORKERS=10`)** | Planned (Step 9) | Caps parallel DO calls; primary backpressure knob alongside retry backoff. |
+| D18 | Worker concurrency | **Fixed worker goroutines (`MAX_WORKERS`)** | Implemented (Step 9) | Shared input channel + N workers; caps parallel DO calls alongside retry backoff. |
 | D19 | Chunk size | **`CHUNK_SIZE=50` (config)** | Planned | Logical grouping for future chunk files / Spaces extension; default aligns with TODO plan. |
 | D20 | Partial failures | **Job status `partial` + per-row `error` in results** | Planned | Spec requires isolated row failures. Confirm with interviewer (see open questions). |
 | D21 | Download | **Stream merge from `results.jsonl`** | Planned | Never `json.Marshal` full result slice — O(1) memory at download time. |
@@ -184,8 +184,9 @@ Considered: `cenkalti/backoff`, `hashicorp/go-retryablehttp`.
 | 5 | Streaming ingest | `0fb4860` | D4, D11 |
 | 6 | Disk job store | `175596b` | D9, D10 |
 | 7 | Backoff helper | `83d1f05` | D12, D13, D14 |
-| 8 | DO inference client | *this commit* | D2, D17 |
-| 9–15 | Pool, runner, API, E2E, docs | *planned* | D18–D21 |
+| 8 | DO inference client | `d275210` | D2, D17 |
+| 9 | Bounded worker pool | *this commit* | D18 |
+| 10–15 | Runner, API, E2E, docs | *planned* | D19–D21 |
 
 ---
 
