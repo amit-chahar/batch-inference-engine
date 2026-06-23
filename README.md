@@ -63,7 +63,7 @@ curl -s http://localhost:8080/health | jq
 ```bash
 JOB=$(curl -s -X POST http://localhost:8080/job/submit \
   -H "Content-Type: application/json" \
-  -d '{"input_file":"sample_batch.jsonl"}' | jq -r .job_id)
+  -d '{"input_file":"sample_batch.jsonl","callback_url":"https://example.com/hook"}' | jq -r .job_id)
 echo "job_id=$JOB"
 ```
 
@@ -126,7 +126,7 @@ Override server URL: `BASE_URL=http://localhost:8080 scripts/demo/01-health.sh`
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Liveness + version |
-| `POST` | `/job/submit` | Body: `{"input_file":"<local path>"}` → `job_id`, `status`, `total_items` |
+| `POST` | `/job/submit` | Body: `{"input_file":"<local path>","callback_url":"<optional https URL>"}` → `job_id`, `status`, `total_items` |
 | `GET` | `/job/{id}/status` | Progress counters + `progress_percent` |
 | `GET` | `/job/{id}/download` | Streamed JSON array of per-row results |
 
@@ -163,9 +163,13 @@ All tunables are env-driven (`internal/config`). See `.env.example`.
 | `MAX_RETRIES` | `5` | Per-row retry budget on 429/500/502/503/504 |
 | `INITIAL_BACKOFF_SECONDS` | `1` | Base retry delay |
 | `MAX_BACKOFF_SECONDS` | `60` | Cap on exponential backoff + `Retry-After` |
-| `CHUNK_SIZE` | `50` | Reserved for future chunk/Spaces extension (not used yet) |
+| `CHUNK_SIZE` | `50` | Seal local `chunks/chunk_N.jsonl` every N results; upload when Spaces configured |
 | `JOBS_DIR` | `data/jobs` | On-disk job root (`meta.json` + `results.jsonl`) |
 | `PORT` | `8080` | HTTP listen port |
+| `SPACES_KEY` | *(optional)* | DO Spaces access key — enables chunk upload |
+| `SPACES_SECRET` | *(optional)* | DO Spaces secret key |
+| `SPACES_BUCKET` | *(optional)* | Target bucket name |
+| `SPACES_REGION` | `nyc3` | DO region slug |
 
 ## Operational ceilings
 
@@ -186,7 +190,7 @@ Peak RAM stays **O(MAX_WORKERS × avg_response_size)**, not O(dataset size).
 | Scale | Input | Execution | Output |
 |-------|-------|-----------|--------|
 | **1K** (sample) | Line-by-line JSONL scan | 10 workers, channel buffer 20 | Single `results.jsonl` → streamed JSON download |
-| **100K** | Same scanner, constant memory | Same bounded pool | Same append-only file; optional future rotation at `CHUNK_SIZE` |
+| **100K** | Same scanner, constant memory | Same bounded pool | Rotate at `CHUNK_SIZE`; upload sealed chunks to Spaces |
 | **500K** | Never load full file | Goroutine count capped by `MAX_WORKERS` | Stream merge on download — never `json.Marshal` all results |
 
 Tune `MAX_WORKERS` down if upstream returns 429; backoff + jitter handle transient pressure.

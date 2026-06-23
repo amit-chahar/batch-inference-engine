@@ -50,7 +50,8 @@ Go implementation plan for the DigitalOcean interview.
 | 10 — Background job runner | ✅ Done | `edb4e58` |
 | 11–14 — API + E2E | ✅ Done | submit/status/download + httptest E2E |
 | 15 — Docs polish | ✅ Done | README + architecture diagram |
-| 16–17 — Extensions | ⬜ Optional | — |
+| 16 — DO Spaces upload | ✅ Done | chunk seal + S3-compatible upload |
+| 17 — Webhook callback | ✅ Done | optional callback_url on submit |
 
 Also see `DECISIONS.md` for rationale behind each choice.
 
@@ -290,14 +291,14 @@ Also see `DECISIONS.md` for rationale behind each choice.
 Do not start these until Steps 1–15 are pushed and CI is green.
 
 ### Step 16 — DO Spaces chunk upload
-- [ ] `internal/storage/spaces.go` — S3-compatible upload
-- [ ] Env: `SPACES_KEY`, `SPACES_SECRET`, `SPACES_BUCKET`, `SPACES_REGION`
+- [x] `internal/storage/spaces.go` — S3-compatible upload
+- [x] Env: `SPACES_KEY`, `SPACES_SECRET`, `SPACES_BUCKET`, `SPACES_REGION`
 
 **Commit:** `feat: upload completed chunk results to DO Spaces`
 
 ### Step 17 — Webhook callback
-- [ ] Accept optional `callback_url` on submit
-- [ ] POST JSON payload when job finishes
+- [x] Accept optional `callback_url` on submit
+- [x] POST JSON payload when job finishes
 
 **Commit:** `feat: optional webhook callback on job completion`
 

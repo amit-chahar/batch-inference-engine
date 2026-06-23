@@ -44,6 +44,15 @@ type Config struct {
 	JobsDir string
 	// Port is the HTTP listen port for this API server.
 	Port int
+
+	// SpacesKey is the DO Spaces access key (optional — enables chunk upload).
+	SpacesKey string
+	// SpacesSecret is the DO Spaces secret key.
+	SpacesSecret string
+	// SpacesBucket is the target bucket name.
+	SpacesBucket string
+	// SpacesRegion is the DO region slug (e.g. nyc3).
+	SpacesRegion string
 }
 
 // Load reads configuration from the process environment.
@@ -60,6 +69,10 @@ func Load() Config {
 		MaxBackoff:       secondsToDuration(envFloat("MAX_BACKOFF_SECONDS", defaultMaxBackoff)),
 		JobsDir:          envString("JOBS_DIR", defaultJobsDir),
 		Port:             envInt("PORT", defaultPort),
+		SpacesKey:        envString("SPACES_KEY", ""),
+		SpacesSecret:     envString("SPACES_SECRET", ""),
+		SpacesBucket:     envString("SPACES_BUCKET", ""),
+		SpacesRegion:     envString("SPACES_REGION", ""),
 	}
 }
 

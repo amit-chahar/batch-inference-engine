@@ -53,11 +53,11 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | D16 | Commit strategy | **Small steps → test → commit → push** | Ongoing | Frequent reviewable diffs; easier to explain timeline to interviewer. |
 | D17 | Testing | **`httptest` mock inference in CI** | Implemented (Step 8) | No live API spend in CI; deterministic tests for 429/500/400 paths. |
 | D18 | Worker concurrency | **Fixed worker goroutines (`MAX_WORKERS`)** | Implemented (Step 9) | Shared input channel + N workers; caps parallel DO calls alongside retry backoff. |
-| D19 | Chunk size | **`CHUNK_SIZE=50` (config)** | Planned | Logical grouping for future chunk files / Spaces extension; default aligns with TODO plan. |
+| D19 | Chunk size | **`CHUNK_SIZE=50` (config)** | Implemented | Seals local `chunks/chunk_N.jsonl` every N rows; uploads when Spaces configured. |
 | D20 | Partial failures | **Job status `partial` + per-row `error` in results** | Planned | Spec requires isolated row failures. Confirm with interviewer (see open questions). |
 | D21 | Download | **Stream merge from `results.jsonl`** | Implemented | Never `json.Marshal` full result slice — O(1) memory at download time. |
-| D22 | DO Spaces extension | **Optional (P2)** | Not started | Spec extension for crash-safe chunk spill; only if core path done early. |
-| D23 | Webhook extension | **Optional (P2)** | Not started | Spec extension; defer until P0/P1 complete. |
+| D22 | DO Spaces extension | **Optional chunk upload (P2)** | Implemented | S3-compatible upload via `internal/storage/spaces.go` when `SPACES_*` env set. |
+| D23 | Webhook extension | **Optional callback_url (P2)** | Implemented | POST completion payload via `internal/webhook/notifier.go` on terminal status. |
 | D24 | Model name | **`llama3.3-70b-instruct` in `.env.example`** | Config default | Placeholder until key scope confirmed; trivial to change via env. |
 | D25 | Code comments | **Package docs + design rationale in code** | Implemented | Helps live code walkthrough with interviewer; see package comments and DECISIONS.md. |
 

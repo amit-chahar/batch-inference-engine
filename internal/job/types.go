@@ -35,12 +35,29 @@ type PromptResult struct {
 // JobMeta tracks persisted job metadata on disk (data/jobs/{id}/meta.json).
 // Counters are updated atomically under per-job locks during processing.
 type JobMeta struct {
-	JobID          string    `json:"job_id"`
-	Status         JobStatus `json:"status"`
-	TotalItems     int       `json:"total_items"`
-	CompletedItems int       `json:"completed_items"`
-	FailedItems    int       `json:"failed_items"`
-	CreatedAt      time.Time `json:"created_at"`
+	JobID             string    `json:"job_id"`
+	Status            JobStatus `json:"status"`
+	TotalItems        int       `json:"total_items"`
+	CompletedItems    int       `json:"completed_items"`
+	FailedItems       int       `json:"failed_items"`
+	CreatedAt         time.Time `json:"created_at"`
+	CallbackURL       string    `json:"callback_url,omitempty"`
+	ActiveResultLines int       `json:"active_result_lines,omitempty"`
+	NextChunkIndex    int       `json:"next_chunk_index,omitempty"`
+	ChunkKeys         []string  `json:"chunk_keys,omitempty"`
+}
+
+// JobCreateOptions configures a newly submitted batch job.
+type JobCreateOptions struct {
+	TotalItems  int
+	CallbackURL string
+}
+
+// SealedChunk describes a local chunk file ready for optional Spaces upload.
+type SealedChunk struct {
+	LocalPath string
+	Index     int
+	ObjectKey string
 }
 
 // ProgressPercent returns completed progress as a percentage of total items.

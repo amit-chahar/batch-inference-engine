@@ -3,28 +3,63 @@ package runner
 
 import (
 	"context"
+	"log"
 
 	"github.com/amit-chahar/batch-inference-engine/internal/ingest"
 	"github.com/amit-chahar/batch-inference-engine/internal/job"
+	"github.com/amit-chahar/batch-inference-engine/internal/storage"
+	"github.com/amit-chahar/batch-inference-engine/internal/webhook"
 	"github.com/amit-chahar/batch-inference-engine/internal/worker"
 )
+
+// Options configures the scatter-gather batch pipeline.
+type Options struct {
+	Store       *job.Store
+	Completer   worker.ItemCompleter
+	MaxWorkers  int
+	ChannelSize int
+	ChunkSize   int
+	Uploader    storage.ChunkUploader
+	Notifier    *webhook.Notifier
+}
 
 // Runner orchestrates the scatter-gather batch pipeline.
 type Runner struct {
 	store       *job.Store
 	pool        *worker.Pool
 	channelSize int
+	chunkSize   int
+	uploader    storage.ChunkUploader
+	notifier    *webhook.Notifier
 }
 
 // New creates a runner with a bounded item channel between ingest and workers.
 func New(store *job.Store, completer worker.ItemCompleter, maxWorkers, channelSize int) *Runner {
+	return NewWithOptions(Options{
+		Store:       store,
+		Completer:   completer,
+		MaxWorkers:  maxWorkers,
+		ChannelSize: channelSize,
+	})
+}
+
+// NewWithOptions constructs a runner with optional chunk upload and webhook support.
+func NewWithOptions(opts Options) *Runner {
+	channelSize := opts.ChannelSize
 	if channelSize < 1 {
-		channelSize = maxWorkers * 2
+		channelSize = opts.MaxWorkers * 2
+	}
+	uploader := opts.Uploader
+	if uploader == nil {
+		uploader = storage.NoopUploader{}
 	}
 	return &Runner{
-		store:       store,
-		pool:        worker.NewPool(maxWorkers, completer),
+		store:       opts.Store,
+		pool:        worker.NewPool(opts.MaxWorkers, opts.Completer),
 		channelSize: channelSize,
+		chunkSize:   opts.ChunkSize,
+		uploader:    uploader,
+		notifier:    opts.Notifier,
 	}
 }
 
@@ -53,7 +88,7 @@ func (r *Runner) Process(ctx context.Context, jobID, inputFile string) error {
 
 	results := r.pool.ProcessItems(ctx, bounded)
 	for result := range results {
-		if err := r.persistResult(jobID, result); err != nil {
+		if err := r.persistResult(ctx, jobID, result); err != nil {
 			_ = r.store.SetStatus(jobID, job.JobStatusFailed)
 			<-bridgeDone
 			return err
@@ -61,7 +96,7 @@ func (r *Runner) Process(ctx context.Context, jobID, inputFile string) error {
 	}
 
 	<-bridgeDone
-	return r.finalizeStatus(jobID)
+	return r.finalize(ctx, jobID)
 }
 
 func (r *Runner) bridgeIngest(
@@ -96,17 +131,23 @@ func (r *Runner) bridgeIngest(
 			if err == nil {
 				continue
 			}
-			// Malformed JSONL row: record failure and continue scanning.
 			failed := job.PromptResult{Error: stringPtr(err.Error())}
-			_ = r.store.AppendResult(jobID, failed)
-			_ = r.store.IncrementFailed(jobID)
+			if persistErr := r.persistResult(ctx, jobID, failed); persistErr != nil {
+				return
+			}
 		}
 	}
 }
 
-func (r *Runner) persistResult(jobID string, result job.PromptResult) error {
-	if err := r.store.AppendResult(jobID, result); err != nil {
+func (r *Runner) persistResult(ctx context.Context, jobID string, result job.PromptResult) error {
+	sealed, err := r.store.AppendResultWithChunking(jobID, result, r.chunkSize)
+	if err != nil {
 		return err
+	}
+	if sealed != nil {
+		if err := r.uploadChunk(ctx, jobID, sealed); err != nil {
+			return err
+		}
 	}
 	if result.Error != nil {
 		return r.store.IncrementFailed(jobID)
@@ -114,7 +155,30 @@ func (r *Runner) persistResult(jobID string, result job.PromptResult) error {
 	return r.store.IncrementCompleted(jobID)
 }
 
-func (r *Runner) finalizeStatus(jobID string) error {
+func (r *Runner) uploadChunk(ctx context.Context, jobID string, sealed *job.SealedChunk) error {
+	if !r.uploader.Enabled() {
+		return nil
+	}
+	url, err := r.uploader.UploadFile(ctx, sealed.ObjectKey, sealed.LocalPath)
+	if err != nil {
+		return err
+	}
+	return r.store.AddChunkKey(jobID, url)
+}
+
+func (r *Runner) finalize(ctx context.Context, jobID string) error {
+	if r.chunkSize > 0 {
+		sealed, err := r.store.SealActiveChunkIfNonEmpty(jobID)
+		if err != nil {
+			return err
+		}
+		if sealed != nil {
+			if err := r.uploadChunk(ctx, jobID, sealed); err != nil {
+				return err
+			}
+		}
+	}
+
 	meta, err := r.store.GetMeta(jobID)
 	if err != nil {
 		return err
@@ -128,7 +192,21 @@ func (r *Runner) finalizeStatus(jobID string) error {
 		status = job.JobStatusFailed
 	}
 
-	return r.store.SetStatus(jobID, status)
+	if err := r.store.SetStatus(jobID, status); err != nil {
+		return err
+	}
+
+	meta, err = r.store.GetMeta(jobID)
+	if err != nil {
+		return err
+	}
+
+	if meta.CallbackURL != "" && r.notifier != nil {
+		if err := r.notifier.Notify(ctx, meta.CallbackURL, webhook.PayloadFromMeta(meta)); err != nil {
+			log.Printf("webhook notify job=%s: %v", jobID, err)
+		}
+	}
+	return nil
 }
 
 func stringPtr(value string) *string {

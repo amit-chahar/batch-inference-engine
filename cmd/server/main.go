@@ -11,20 +11,34 @@ import (
 	"github.com/amit-chahar/batch-inference-engine/internal/config"
 	"github.com/amit-chahar/batch-inference-engine/internal/job"
 	"github.com/amit-chahar/batch-inference-engine/internal/runner"
+	"github.com/amit-chahar/batch-inference-engine/internal/storage"
+	"github.com/amit-chahar/batch-inference-engine/internal/webhook"
 	"github.com/amit-chahar/batch-inference-engine/internal/worker"
 )
 
 const version = "0.1.0"
 
 func main() {
-	// All tunables (port, worker pool, DO inference URL/key) come from env/.env.
 	cfg := config.Load()
 
 	store := job.NewStore(cfg.JobsDir)
 	inferenceClient := worker.NewInferenceClientFromConfig(cfg)
-	runner := runner.New(store, inferenceClient, cfg.MaxWorkers, cfg.MaxWorkers*2)
+	uploader := storage.NewSpacesUploaderFromConfig(cfg)
+	batchRunner := runner.NewWithOptions(runner.Options{
+		Store:       store,
+		Completer:   inferenceClient,
+		MaxWorkers:  cfg.MaxWorkers,
+		ChannelSize: cfg.MaxWorkers * 2,
+		ChunkSize:   cfg.ChunkSize,
+		Uploader:    uploader,
+		Notifier:    webhook.NewNotifier(),
+	})
 
-	handler := api.NewHandlerWithRunner(version, store, runner)
+	if uploader.Enabled() {
+		log.Printf("DO Spaces chunk upload enabled (bucket=%s region=%s)", cfg.SpacesBucket, cfg.SpacesRegion)
+	}
+
+	handler := api.NewHandlerWithRunner(version, store, batchRunner)
 	router := api.NewRouter(handler)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

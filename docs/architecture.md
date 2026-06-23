@@ -96,7 +96,7 @@ Non-retryable 4xx (400, 401, …) become per-row errors; the batch continues unl
 | Inference HTTP timeout | 30 seconds | Per upstream call |
 | Backoff range | 1s – 60s + jitter | Configurable via env |
 | Result file | Single `results.jsonl` per job | No in-memory aggregation |
-| `CHUNK_SIZE=50` | Config only today | Reserved for Step 16 chunk/Spaces rotation |
+| `CHUNK_SIZE=50` | Seals `chunks/chunk_N.jsonl` every N rows; uploads when Spaces env is set |
 
 ## Memory model
 
@@ -122,12 +122,10 @@ Peak RAM is **O(MAX_WORKERS × average response size)**, not O(number of prompts
 
 Interview spec text described a JSON **array** file; clarified requirement is JSONL for ingest streaming. Download intentionally returns a JSON **array** for downstream consumers that expect aggregated output.
 
-## Future extensions (optional)
+## Extensions (implemented)
 
-- **DO Spaces** (`internal/storage/spaces.go`) — flush completed chunks to object storage; env: `SPACES_KEY`, `SPACES_SECRET`, `SPACES_BUCKET`, `SPACES_REGION`.
-- **Webhooks** — optional `callback_url` on submit; POST payload when job reaches terminal status.
-
-See `TODO.md` Steps 16–17.
+- **DO Spaces** (`internal/storage/spaces.go`) — uploads sealed chunks via S3-compatible API when `SPACES_*` env vars are set.
+- **Webhooks** (`internal/webhook/notifier.go`) — optional `callback_url` on submit; POST completion payload when job reaches terminal status.
 
 ## External references
 

@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -53,7 +53,8 @@ func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
 }
 
 type submitRequest struct {
-	InputFile string `json:"input_file"`
+	InputFile   string `json:"input_file"`
+	CallbackURL string `json:"callback_url,omitempty"`
 }
 
 type submitResponse struct {
@@ -83,6 +84,14 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "input_file is required"})
 		return
 	}
+	req.CallbackURL = strings.TrimSpace(req.CallbackURL)
+	if req.CallbackURL != "" {
+		parsed, err := url.ParseRequestURI(req.CallbackURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "callback_url must be a valid http(s) URL"})
+			return
+		}
+	}
 
 	totalItems, err := ingest.CountNonEmptyLines(req.InputFile)
 	if err != nil {
@@ -90,7 +99,10 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	meta, err := h.store.CreateJob(totalItems)
+	meta, err := h.store.CreateJobWithOptions(job.JobCreateOptions{
+		TotalItems:  totalItems,
+		CallbackURL: req.CallbackURL,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create job"})
 		return
@@ -144,27 +156,9 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path, err := h.store.ResultsPath(jobID)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if err == job.ErrJobNotFound {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
-		return
-	}
-
-	file, err := os.Open(path)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "open results"})
-		return
-	}
-	defer file.Close()
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := job.WriteResultsArray(w, file); err != nil {
-		// Headers may already be sent; client may see truncated JSON.
+	if err := h.store.StreamResults(jobID, w); err != nil {
 		return
 	}
 }
