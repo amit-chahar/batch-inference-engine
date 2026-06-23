@@ -44,6 +44,8 @@ curl -X POST http://localhost:8000/job/submit \
 make generate-batch
 ```
 
+**Format note:** The original interview prompt mentions a JSON array (`sample_batch.json`); the interviewer clarified **JSONL** (one JSON object per line) for streaming ingest. Input is parsed with `bufio.Scanner` + line decode, so memory stays **O(1)** relative to file size — important when scaling to 500K rows.
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full flow diagram and scaling discussion.
