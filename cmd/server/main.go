@@ -22,7 +22,11 @@ func main() {
 	cfg := config.Load()
 
 	store := job.NewStore(cfg.JobsDir)
-	inferenceClient := worker.NewInferenceClientFromConfig(cfg)
+	inferenceLimiter := worker.NewConcurrencyLimiter(cfg.MaxWorkers)
+	inferenceClient := worker.NewLimitedCompleter(
+		worker.NewInferenceClientFromConfig(cfg),
+		inferenceLimiter,
+	)
 	uploader := storage.NewSpacesUploaderFromConfig(cfg)
 	batchRunner := runner.NewWithOptions(runner.Options{
 		Store:       store,

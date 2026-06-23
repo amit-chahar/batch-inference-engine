@@ -159,7 +159,7 @@ All tunables are env-driven (`internal/config`). See `.env.example`.
 | `DO_MODEL_ACCESS_KEY` | *(required for live inference)* | Bearer token for DO Serverless Inference |
 | `INFERENCE_API_URL` | `https://inference.do-ai.run/v1/chat/completions` | OpenAI-compatible chat endpoint |
 | `INFERENCE_MODEL` | `llama3.3-70b-instruct` | Model slug in each request |
-| `MAX_WORKERS` | `10` | Max concurrent inference goroutines |
+| `MAX_WORKERS` | `10` | Max concurrent DO inference calls **process-wide** (global limiter) |
 | `MAX_RETRIES` | `5` | Per-row retry budget on 429/500/502/503/504 |
 | `INITIAL_BACKOFF_SECONDS` | `1` | Base retry delay |
 | `MAX_BACKOFF_SECONDS` | `60` | Cap on exponential backoff + `Retry-After` |
@@ -175,7 +175,8 @@ All tunables are env-driven (`internal/config`). See `.env.example`.
 
 | Knob | Value | Where enforced |
 |------|-------|----------------|
-| Concurrent inference calls | `MAX_WORKERS` (default 10) | `internal/worker/pool.go` |
+| Concurrent inference calls | `MAX_WORKERS` (default 10) | `internal/worker/limiter.go` wraps shared inference client |
+| Per-job worker goroutines | `MAX_WORKERS` per active job | `internal/worker/pool.go` |
 | Ingest → worker queue depth | `MAX_WORKERS × 2` | `internal/runner` bounded channel |
 | Retries per prompt row | `MAX_RETRIES + 1` attempts | `internal/worker/inference.go` |
 | Retryable HTTP codes | 429, 500, 502, 503, 504 | `internal/worker/backoff.go` |

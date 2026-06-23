@@ -29,7 +29,7 @@ type Config struct {
 	// InferenceModel is the model slug passed in each inference request body.
 	InferenceModel string
 
-	// MaxWorkers caps concurrent inference goroutines (primary rate-limit lever).
+	// MaxWorkers caps concurrent inference calls process-wide (shared limiter in cmd/server).
 	MaxWorkers int
 	// ChunkSize groups items for future chunk/spill boundaries (Spaces extension).
 	ChunkSize int

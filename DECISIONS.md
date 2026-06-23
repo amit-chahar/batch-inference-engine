@@ -52,7 +52,7 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | D15 | CI/CD | **GitHub Actions** (`go vet`, `go test -race`, `go build`) | Implemented | Spec requirement. Temporarily removed during billing issue, restored once fixed. |
 | D16 | Commit strategy | **Small steps → test → commit → push** | Ongoing | Frequent reviewable diffs; easier to explain timeline to interviewer. |
 | D17 | Testing | **`httptest` mock inference in CI** | Implemented (Step 8) | No live API spend in CI; deterministic tests for 429/500/400 paths. |
-| D18 | Worker concurrency | **Fixed worker goroutines (`MAX_WORKERS`)** | Implemented (Step 9) | Shared input channel + N workers; caps parallel DO calls alongside retry backoff. |
+| D18 | Worker concurrency | **Fixed worker goroutines + global inference limiter (`MAX_WORKERS`)** | Implemented | Per-job pool fans out work; `LimitedCompleter` enforces a process-wide cap on live DO calls when multiple jobs run. |
 | D19 | Chunk size | **`CHUNK_SIZE=50` (config)** | Implemented | Seals local `chunks/chunk_N.jsonl` every N rows; uploads when Spaces configured. |
 | D20 | Partial failures | **Job status `partial` + per-row `error` in results** | Planned | Spec requires isolated row failures. Confirm with interviewer (see open questions). |
 | D21 | Download | **Stream merge from `results.jsonl`** | Implemented | Never `json.Marshal` full result slice — O(1) memory at download time. |

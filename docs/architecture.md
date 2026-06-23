@@ -90,7 +90,7 @@ Non-retryable 4xx (400, 401, …) become per-row errors; the batch continues unl
 
 | Concern | Default / limit | Notes |
 |---------|-----------------|-------|
-| Concurrent inference | `MAX_WORKERS=10` | Primary rate-limit lever |
+| Concurrent inference | `MAX_WORKERS=10` | Process-wide cap via `LimitedCompleter`; each job also uses a pool of N workers |
 | Queue backpressure | Channel size `MAX_WORKERS × 2` | Ingest blocks when full |
 | Retries | `MAX_RETRIES=5` → up to 6 attempts | Per prompt row |
 | Inference HTTP timeout | 30 seconds | Per upstream call |
