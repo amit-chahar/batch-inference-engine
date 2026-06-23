@@ -3,7 +3,7 @@
 Living document for the DigitalOcean batch inference interview.  
 Use this when walking the interviewer through the codebase: **what we chose, what we rejected, and why**.
 
-Last updated: after Step 7 (backoff helper). Steps 8–15 are **planned** unless marked **implemented**.
+Last updated: after global limiter + Steps 16–17. Phase 2 global queue is **sketched, not implemented**.
 
 ---
 
@@ -37,7 +37,7 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 |---|----------|--------|--------|-----|
 | D1 | Language | **Go** | Implemented | Strong concurrency (goroutines + channels), stdlib HTTP, fast compile/test loop, good fit for worker pools. Python scaffold was replaced early. |
 | D2 | Upstream inference | **DO Serverless Inference** (`POST …/v1/chat/completions`) | Config ready | Interviewer confirmed DO endpoint + Model Access Key. OpenAI-compatible request shape. |
-| D3 | Orchestration | **Build our own** worker pool + job lifecycle | Partial | Spec / interviewer: do **not** delegate batch orchestration to DO Batch API. We own submit/status/download. |
+| D3 | Orchestration | **Build our own** worker pool + job lifecycle | Implemented | Spec / interviewer: do **not** delegate batch orchestration to DO Batch API. We own submit/status/download. |
 | D4 | Input format | **JSONL** (1000 lines, one object per line) | Implemented | Interviewer clarified vs original spec’s JSON array. Enables O(1) memory streaming via `bufio.Scanner`. |
 | D5 | Input filename | **`sample_batch.jsonl`** | Implemented | Keeps `.jsonl` extension honest. README notes divergence from spec’s `sample_batch.json` wording. |
 | D6 | HTTP router | **chi** (`go-chi/chi/v5`) | Implemented | Lightweight, stdlib-compatible, middleware support. Avoids heavier frameworks under time pressure. |
@@ -60,6 +60,7 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | D23 | Webhook extension | **Optional callback_url (P2)** | Implemented | POST completion payload via `internal/webhook/notifier.go` on terminal status. |
 | D24 | Model name | **`llama3.3-70b-instruct` in `.env.example`** | Config default | Placeholder until key scope confirmed; trivial to change via env. |
 | D25 | Code comments | **Package docs + design rationale in code** | Implemented | Helps live code walkthrough with interviewer; see package comments and DECISIONS.md. |
+| D26 | Multi-job execution model | **Per-job pool today → global work queue (Phase 2 sketch)** | Sketch only | See [Global work queue sketch](#global-work-queue-sketch-phase-2). Limiter (D18) caps DO calls; global queue caps goroutines + queued memory. |
 
 ---
 
@@ -213,6 +214,188 @@ Use these if asked about memory — they match our design intent:
 3. **Output:** Append-only `results.jsonl` → never materialize full array.
 4. **Status:** Counters in `meta.json` only → O(1) metadata.
 5. **Download:** Stream lines into JSON array response → merge without loading all results.
+6. **Multi-job:** Process-wide inference limiter (`LimitedCompleter`) caps live DO calls at `MAX_WORKERS`. For many concurrent jobs, promote to a **global work queue** (sketch below) to avoid `jobs × MAX_WORKERS` goroutines and per-job channel buffering.
+
+---
+
+## Global work queue sketch (Phase 2)
+
+**Status:** design only — not implemented. Current code uses **per-job pools + global inference limiter** (commit `3d88ccc`), which is sufficient for the single-job interview demo.
+
+### Problem with per-job pools at multi-tenant scale
+
+With **J** concurrent jobs and `MAX_WORKERS=10`:
+
+| Resource | Per-job pool (today) | Global queue (Phase 2) |
+|----------|----------------------|-------------------------|
+| Live DO calls | ≤ 10 (limiter) | ≤ 10 (fixed workers) |
+| Worker goroutines | **J × 10** | **10** (fixed) |
+| Queued items in memory | **J × (channel buffer)** | **1 shared buffer** (configurable cap) |
+| Fairness across jobs | Large job can fill limiter | Explicit round-robin / per-job caps |
+
+The limiter fixes **upstream concurrency**; a global queue fixes **process footprint and backpressure** when many jobs run at once.
+
+### Target architecture
+
+```mermaid
+flowchart TB
+    subgraph jobs["Per-job coordinators (one goroutine each)"]
+        J1["Job A ingest"]
+        J2["Job B ingest"]
+    end
+
+    subgraph global["Process-wide (started once in main)"]
+        Q["Work queue<br/>chan WorkItem"]
+        W1["Worker 1"]
+        W2["Worker 2"]
+        WN["Worker N = MAX_WORKERS"]
+        Q --> W1 & W2 & WN
+        W1 & W2 & WN --> IC["InferenceClient<br/>(no separate limiter needed)"]
+    end
+
+    subgraph gather["Per-job gather"]
+        R1["Job A results → store"]
+        R2["Job B results → store"]
+    end
+
+    J1 -->|Enqueue| Q
+    J2 -->|Enqueue| Q
+    IC -->|ResultItem| R1 & R2
+```
+
+Each job still **streams JSONL** locally (O(1) input memory). Only **work units** enter the shared queue.
+
+### Core types (proposed)
+
+```go
+// internal/worker/global_pool.go
+
+type WorkItem struct {
+    JobID string
+    Item  job.PromptItem
+}
+
+type ResultItem struct {
+    JobID  string
+    Result job.PromptResult
+}
+
+type GlobalPool struct {
+    work     chan WorkItem      // bounded: e.g. MAX_WORKERS * 4
+    results  chan ResultItem    // fan-in from all workers
+    completer ItemCompleter
+    workers  int
+}
+
+func NewGlobalPool(workers int, queueDepth int, completer ItemCompleter) *GlobalPool
+func (p *GlobalPool) Start(ctx context.Context)  // spawn N worker goroutines once
+func (p *GlobalPool) Enqueue(ctx context.Context, item WorkItem) error
+func (p *GlobalPool) Results() <-chan ResultItem
+```
+
+```go
+// internal/runner/job_session.go — one active job
+
+type JobSession struct {
+    jobID       string
+    remaining   int64          // atomic: items left to process
+    resultSink  chan ResultItem // optional; or demux in coordinator
+    done        chan struct{}
+}
+
+func (r *Runner) ProcessAsync(jobID, inputFile string) {
+    go r.runJob(context.Background(), jobID, inputFile)
+}
+
+func (r *Runner) runJob(ctx context.Context, jobID, inputFile string) {
+    // 1. SetStatus(running)
+    // 2. Stream ingest → globalPool.Enqueue(WorkItem{jobID, item})
+    // 3. Separate goroutine (or shared demux): read Results(), filter jobID, persist
+    // 4. When remaining == 0 → finalize (chunk seal, webhook)
+}
+```
+
+### Wiring in `main.go`
+
+```go
+pool := worker.NewGlobalPool(cfg.MaxWorkers, cfg.MaxWorkers*4, inferenceClient)
+pool.Start(context.Background())
+
+runner := runner.NewWithOptions(runner.Options{
+    Store:      store,
+    GlobalPool: pool,           // replaces per-job worker.Pool
+    ChunkSize:  cfg.ChunkSize,
+    // ...
+})
+```
+
+`LimitedCompleter` becomes **optional** once worker count == inference cap (same semaphore, one layer).
+
+### Job lifecycle / completion tracking
+
+```
+Submit
+  → CreateJob, total_items = N
+  → runJob goroutine
+       ingest enqueues N work items (or N + ingest errors as failed rows)
+       remaining = N (or total rows including parse failures)
+  → demux loop:
+       on ResultItem for jobID: persist, decrement remaining
+       when remaining == 0: finalize(status, webhook)
+```
+
+Use `sync/atomic` for `remaining` — no mutex on hot path.
+
+### Backpressure
+
+| Knob | Purpose |
+|------|---------|
+| `GlobalPool.work` buffer size | Cap total queued items process-wide |
+| `Enqueue` blocks when full | Ingest goroutine stalls → natural backpressure on file read |
+| Optional `MAX_QUEUED_PER_JOB` | Prevent one 500K job from monopolizing queue |
+
+### Fairness (MVP+)
+
+Simple upgrade after MVP FIFO queue:
+
+- **Round-robin enqueue** from multiple job ingest loops, or
+- **Per-job sub-queues** drained fairly by a scheduler goroutine.
+
+Not required for interview; mention as Phase 2b.
+
+### Migration from current code
+
+| Step | Change | ~Effort |
+|------|--------|---------|
+| 1 | Add `GlobalPool` + tests (mock completer, peak concurrency) | 2 h |
+| 2 | Refactor `Runner.Process` → enqueue + demux persist | 2 h |
+| 3 | Wire singleton in `main`, remove per-job `worker.NewPool` | 30 min |
+| 4 | Update E2E + runner tests | 1 h |
+| 5 | Remove or keep `LimitedCompleter` (redundant but harmless) | 15 min |
+| 6 | Docs + optional fairness | 1 h |
+
+**MVP total:** ~4–6 hours. **Fair scheduling + cancel:** +1 day.
+
+### Files touched (estimate)
+
+| File | Action |
+|------|--------|
+| `internal/worker/global_pool.go` | **New** |
+| `internal/worker/global_pool_test.go` | **New** |
+| `internal/runner/runner.go` | Refactor `Process` / `ProcessAsync` |
+| `internal/runner/job_session.go` | **New** (optional split) |
+| `cmd/server/main.go` | Start pool once |
+| `internal/worker/pool.go` | Keep for unit tests or deprecate |
+| `internal/worker/limiter.go` | Likely remove after merge |
+| `docs/architecture.md` | Update diagram |
+
+### When to implement
+
+| Scenario | Action |
+|----------|--------|
+| Interview demo (1 batch) | **Skip** — explain sketch |
+| Reviewer asks multi-tenant | Walk this section |
+| Production many parallel jobs | Implement MVP global queue |
 
 ---
 

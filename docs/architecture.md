@@ -127,6 +127,12 @@ Interview spec text described a JSON **array** file; clarified requirement is JS
 - **DO Spaces** (`internal/storage/spaces.go`) — uploads sealed chunks via S3-compatible API when `SPACES_*` env vars are set.
 - **Webhooks** (`internal/webhook/notifier.go`) — optional `callback_url` on submit; POST completion payload when job reaches terminal status.
 
+## Phase 2 (sketched, not implemented)
+
+**Global work queue** — one fixed worker fleet and shared bounded queue for all jobs, instead of `MAX_WORKERS` goroutines per job. Fixes multi-job goroutine and queue memory growth while keeping JSONL ingest per job.
+
+See the full design (types, wiring, migration steps, effort): [DECISIONS.md — Global work queue sketch](../DECISIONS.md#global-work-queue-sketch-phase-2).
+
 ## External references
 
 - [Serverless Inference](https://docs.digitalocean.com/products/inference/how-to/use-serverless-inference/)
