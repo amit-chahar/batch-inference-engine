@@ -36,14 +36,14 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | # | Decision | Choice | Status | Why |
 |---|----------|--------|--------|-----|
 | D1 | Language | **Go** | Implemented | Strong concurrency (goroutines + channels), stdlib HTTP, fast compile/test loop, good fit for worker pools. Python scaffold was replaced early. |
-| D2 | Upstream inference | **DO Serverless Inference** (`POST …/v1/chat/completions`) | Config ready | Interviewer confirmed DO endpoint + Model Access Key. OpenAI-compatible request shape. |
+| D2 | Upstream inference | **DO Serverless Inference** (`POST …/v1/chat/completions`) | Implemented | Interviewer confirmed DO endpoint + Model Access Key. OpenAI-compatible request shape. |
 | D3 | Orchestration | **Build our own** worker pool + job lifecycle | Implemented | Spec / interviewer: do **not** delegate batch orchestration to DO Batch API. We own submit/status/download. |
 | D4 | Input format | **JSONL** (1000 lines, one object per line) | Implemented | Interviewer clarified vs original spec’s JSON array. Enables O(1) memory streaming via `bufio.Scanner`. |
 | D5 | Input filename | **`sample_batch.jsonl`** | Implemented | Keeps `.jsonl` extension honest. README notes divergence from spec’s `sample_batch.json` wording. |
 | D6 | HTTP router | **chi** (`go-chi/chi/v5`) | Implemented | Lightweight, stdlib-compatible, middleware support. Avoids heavier frameworks under time pressure. |
 | D7 | Config loading | **Env vars** via `internal/config` | Implemented | 12-factor style; easy to inject DO key in `.env` without code changes. No flag parsing needed for interview scope. |
 | D8 | Secrets | **`DO_MODEL_ACCESS_KEY` in `.env` only** | Implemented | Never committed. Tests/CI use mocks. Live key for manual demo only. |
-| D9 | Job persistence | **Disk: `meta.json` + `results.jsonl`** | Implemented | Survives process restarts; avoids holding full result sets in RAM. Matches scaling story for 100K–500K rows. |
+| D9 | Job persistence | **Disk: `meta.json` + active/chunked JSONL results** | Implemented | Survives process restarts; avoids holding full result sets in RAM. Matches scaling story for 100K–500K rows. |
 | D10 | Job IDs | **`github.com/google/uuid`** | Implemented | Standard, collision-safe IDs without rolling our own. |
 | D11 | Ingest parsing | **`bufio.Scanner` + line JSON decode** | Implemented | Simple JSONL reader; constant memory per row. Malformed lines emit errors but don’t abort the file scan. |
 | D12 | Backoff | **Custom `internal/worker/backoff`** | Implemented | Interview asks to demonstrate 429 handling. ~100 lines, fully tested, honors `Retry-After`. Libraries (`cenkalti/backoff`, `go-retryablehttp`) exist but custom code shows understanding. **Decision reaffirmed:** keep custom helper. |
@@ -54,8 +54,8 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | D17 | Testing | **`httptest` mock inference in CI** | Implemented (Step 8) | No live API spend in CI; deterministic tests for 429/500/400 paths. |
 | D18 | Worker concurrency | **Fixed worker goroutines + global inference limiter (`MAX_WORKERS`)** | Implemented | Per-job pool fans out work; `LimitedCompleter` enforces a process-wide cap on live DO calls when multiple jobs run. |
 | D19 | Chunk size | **`CHUNK_SIZE=50` (config)** | Implemented | Seals local `chunks/chunk_N.jsonl` every N rows; uploads when Spaces configured. |
-| D20 | Partial failures | **Job status `partial` + per-row `error` in results** | Planned | Spec requires isolated row failures. Confirm with interviewer (see open questions). |
-| D21 | Download | **Stream merge from `results.jsonl`** | Implemented | Never `json.Marshal` full result slice — O(1) memory at download time. |
+| D20 | Partial failures | **Job status `partial` + per-row `error` in results** | Implemented | Spec requires isolated row failures; successful rows still complete and failed rows are visible in downloaded output. |
+| D21 | Download | **Stream merge from active/chunked JSONL result files** | Implemented | Never `json.Marshal` full result slice — O(1) memory at download time. |
 | D22 | DO Spaces extension | **Optional chunk upload (P2)** | Implemented | S3-compatible upload via `internal/storage/spaces.go` when `SPACES_*` env set. |
 | D23 | Webhook extension | **Optional callback_url (P2)** | Implemented | POST completion payload via `internal/webhook/notifier.go` on terminal status. |
 | D24 | Model name | **`llama3.3-70b-instruct` in `.env.example`** | Config default | Placeholder until key scope confirmed; trivial to change via env. |
@@ -142,7 +142,7 @@ Considered: `cenkalti/backoff`, `hashicorp/go-retryablehttp`.
 | Variable | Default | Why |
 |----------|---------|-----|
 | `MAX_WORKERS` | 10 | Balance throughput vs DO rate limits during demo |
-| `CHUNK_SIZE` | 50 | Future chunk/spill boundaries |
+| `CHUNK_SIZE` | 50 | Seal local result chunks; upload to Spaces when configured |
 | `MAX_RETRIES` | 5 | Enough for 429 storms without infinite loops |
 | `INITIAL_BACKOFF_SECONDS` | 1 | Fast first retry |
 | `MAX_BACKOFF_SECONDS` | 60 | Cap wait per attempt |

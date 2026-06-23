@@ -181,7 +181,7 @@ All tunables are env-driven (`internal/config`). See `.env.example`.
 | Retries per prompt row | `MAX_RETRIES + 1` attempts | `internal/worker/inference.go` |
 | Retryable HTTP codes | 429, 500, 502, 503, 504 | `internal/worker/backoff.go` |
 | HTTP client timeout | 30s per inference call | `internal/worker/inference.go` |
-| Result storage | One append-only `results.jsonl` per job | `internal/job/store.go` |
+| Result storage | Active `results.jsonl` plus sealed `chunks/chunk_N.jsonl` | `internal/job/store.go` |
 | Download merge | Stream line-by-line → JSON array | `internal/job/stream.go` |
 
 Peak RAM stays **O(MAX_WORKERS × avg_response_size)**, not O(dataset size).
@@ -190,9 +190,9 @@ Peak RAM stays **O(MAX_WORKERS × avg_response_size)**, not O(dataset size).
 
 | Scale | Input | Execution | Output |
 |-------|-------|-----------|--------|
-| **1K** (sample) | Line-by-line JSONL scan | 10 workers, channel buffer 20 | Single `results.jsonl` → streamed JSON download |
+| **1K** (sample) | Line-by-line JSONL scan | 10 workers, channel buffer 20 | Active `results.jsonl`; download streams JSON array |
 | **100K** | Same scanner, constant memory | Same bounded pool | Rotate at `CHUNK_SIZE`; upload sealed chunks to Spaces |
-| **500K** | Never load full file | Goroutine count capped by `MAX_WORKERS` | Stream merge on download — never `json.Marshal` all results |
+| **500K** | Never load full file | DO calls capped by `MAX_WORKERS`; Phase 2 global queue sketched for many jobs | Stream merge on download — never `json.Marshal` all results |
 
 Tune `MAX_WORKERS` down if upstream returns 429; backoff + jitter handle transient pressure.
 

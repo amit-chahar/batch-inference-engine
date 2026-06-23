@@ -308,7 +308,7 @@ Do not start these until Steps 1–15 are pushed and CI is green.
 
 | Scale | Input | Execution | Output |
 |-------|-------|-----------|--------|
-| 1K | Line-by-line JSONL scan | 10 workers | Single `results.jsonl` |
+| 1K | Line-by-line JSONL scan | 10 workers | Active `results.jsonl` |
 | 100K | Same line scanner | Same pool | Rotate jsonl every `CHUNK_SIZE` lines |
 | 500K | Never load all lines into memory | Bounded goroutines + channel | Stream merge on download |
 

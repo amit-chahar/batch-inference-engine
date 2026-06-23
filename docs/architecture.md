@@ -95,7 +95,7 @@ Non-retryable 4xx (400, 401, …) become per-row errors; the batch continues unl
 | Retries | `MAX_RETRIES=5` → up to 6 attempts | Per prompt row |
 | Inference HTTP timeout | 30 seconds | Per upstream call |
 | Backoff range | 1s – 60s + jitter | Configurable via env |
-| Result file | Single `results.jsonl` per job | No in-memory aggregation |
+| Result files | Active `results.jsonl` plus sealed `chunks/chunk_N.jsonl` | No in-memory aggregation; chunks upload when Spaces is configured |
 | `CHUNK_SIZE=50` | Seals `chunks/chunk_N.jsonl` every N rows; uploads when Spaces env is set |
 
 ## Memory model
@@ -114,8 +114,8 @@ Peak RAM is **O(MAX_WORKERS × average response size)**, not O(number of prompts
 
 | Scale | Input | Execution | Output |
 |-------|-------|-----------|--------|
-| 1K | Line scanner | 10 workers | One `results.jsonl` |
-| 100K | Same | Same pool | Same file; future: rotate at `CHUNK_SIZE` |
+| 1K | Line scanner | 10 workers | Active `results.jsonl` |
+| 100K | Same | Same pool | Rotate at `CHUNK_SIZE`; upload sealed chunks to Spaces |
 | 500K | Never load all lines | Bounded goroutines + channel | Stream merge on download |
 
 ## Input format note
