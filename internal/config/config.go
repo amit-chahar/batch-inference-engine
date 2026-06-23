@@ -1,3 +1,5 @@
+// Package config loads runtime settings from environment variables.
+// Defaults target DigitalOcean Serverless Inference; override via .env locally.
 package config
 
 import (
@@ -20,19 +22,32 @@ const (
 
 // Config holds runtime settings loaded from environment variables.
 type Config struct {
+	// DOModelAccessKey is the Bearer token for DO Serverless Inference (never commit).
 	DOModelAccessKey string
-	InferenceAPIURL  string
-	InferenceModel   string
-	MaxWorkers       int
-	ChunkSize        int
-	MaxRetries       int
-	InitialBackoff   time.Duration
-	MaxBackoff       time.Duration
-	JobsDir          string
-	Port             int
+	// InferenceAPIURL is the OpenAI-compatible chat completions endpoint.
+	InferenceAPIURL string
+	// InferenceModel is the model slug passed in each inference request body.
+	InferenceModel string
+
+	// MaxWorkers caps concurrent inference goroutines (primary rate-limit lever).
+	MaxWorkers int
+	// ChunkSize groups items for future chunk/spill boundaries (Spaces extension).
+	ChunkSize int
+	// MaxRetries is the per-request retry budget for 429/5xx responses.
+	MaxRetries int
+	// InitialBackoff is the base delay before the first retry attempt.
+	InitialBackoff time.Duration
+	// MaxBackoff caps exponential growth and Retry-After delays.
+	MaxBackoff time.Duration
+
+	// JobsDir is the on-disk root for meta.json + results.jsonl per job.
+	JobsDir string
+	// Port is the HTTP listen port for this API server.
+	Port int
 }
 
 // Load reads configuration from the process environment.
+// Missing or invalid numeric env vars fall back to safe defaults.
 func Load() Config {
 	return Config{
 		DOModelAccessKey: envString("DO_MODEL_ACCESS_KEY", ""),
@@ -63,6 +78,7 @@ func envInt(key string, fallback int) int {
 
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
+		// Ignore malformed env values so a typo does not crash the server.
 		return fallback
 	}
 	return parsed

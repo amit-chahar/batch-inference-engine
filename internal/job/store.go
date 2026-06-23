@@ -16,17 +16,23 @@ import (
 var ErrJobNotFound = errors.New("job not found")
 
 // Store persists job metadata and append-only results on disk.
+// Layout per job:
+//
+//	{rootDir}/{jobID}/meta.json      — status + counters
+//	{rootDir}/{jobID}/results.jsonl  — one PromptResult JSON per line
 type Store struct {
 	rootDir string
-	locks   sync.Map
+	// locks provides one mutex per job ID so concurrent workers can append safely.
+	locks sync.Map
 }
 
-// NewStore creates a job store rooted at the given directory.
+// NewStore creates a job store rooted at the given directory (typically data/jobs).
 func NewStore(rootDir string) *Store {
 	return &Store{rootDir: rootDir}
 }
 
 // CreateJob allocates a new job directory and writes initial metadata.
+// Returns the generated UUID so the API can respond immediately to POST /job/submit.
 func (s *Store) CreateJob(totalItems int) (JobMeta, error) {
 	jobID := uuid.NewString()
 	dir := s.jobDir(jobID)
@@ -50,6 +56,7 @@ func (s *Store) CreateJob(totalItems int) (JobMeta, error) {
 		return JobMeta{}, err
 	}
 
+	// Create an empty results file up front so append path is uniform.
 	resultsPath := filepath.Join(dir, "results.jsonl")
 	file, err := os.OpenFile(resultsPath, os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -84,7 +91,7 @@ func (s *Store) IncrementFailed(jobID string) error {
 	})
 }
 
-// SetStatus updates the job status.
+// SetStatus updates the job status (pending → running → completed/partial/failed).
 func (s *Store) SetStatus(jobID string, status JobStatus) error {
 	return s.updateMeta(jobID, func(meta *JobMeta) {
 		meta.Status = status
@@ -92,6 +99,7 @@ func (s *Store) SetStatus(jobID string, status JobStatus) error {
 }
 
 // AppendResult appends one result row to results.jsonl.
+// Append-only JSONL avoids loading prior results into memory when adding new rows.
 func (s *Store) AppendResult(jobID string, result PromptResult) error {
 	mu := s.lock(jobID)
 	mu.Lock()
@@ -151,6 +159,7 @@ func (s *Store) readMetaLocked(jobID string) (JobMeta, error) {
 	return meta, nil
 }
 
+// writeMetaLocked atomically replaces meta.json via temp file + rename.
 func (s *Store) writeMetaLocked(jobID string, meta JobMeta) error {
 	path := filepath.Join(s.jobDir(jobID), "meta.json")
 	tmpPath := path + ".tmp"

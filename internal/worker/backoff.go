@@ -1,3 +1,5 @@
+// Package worker runs concurrent inference calls with rate-limit aware retries.
+// Backoff logic lives here; the inference HTTP client (Step 8) will call into it.
 package worker
 
 import (
@@ -9,11 +11,12 @@ import (
 	"time"
 )
 
+// retryableStatusCodes are retried with exponential backoff (transient upstream pressure).
 var retryableStatusCodes = map[int]struct{}{
-	http.StatusTooManyRequests:     {},
-	http.StatusBadGateway:          {},
-	http.StatusServiceUnavailable:  {},
-	http.StatusGatewayTimeout:      {},
+	http.StatusTooManyRequests:    {}, // 429 — primary interview scenario
+	http.StatusBadGateway:         {}, // 502
+	http.StatusServiceUnavailable: {}, // 503
+	http.StatusGatewayTimeout:     {}, // 504
 }
 
 // Backoff computes retry delays with exponential growth and jitter.
@@ -29,6 +32,7 @@ func NewBackoff(initial, max time.Duration) *Backoff {
 }
 
 // NewBackoffWithRand creates a backoff calculator using the provided random source.
+// Inject a seeded RNG in tests for deterministic jitter assertions.
 func NewBackoffWithRand(initial, max time.Duration, rng *rand.Rand) *Backoff {
 	if rng == nil {
 		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -41,6 +45,7 @@ func NewBackoffWithRand(initial, max time.Duration, rng *rand.Rand) *Backoff {
 }
 
 // ShouldRetry reports whether an HTTP status code should be retried.
+// Non-retryable 4xx (400, 401, etc.) become permanent row failures in the inference client.
 func ShouldRetry(statusCode int) bool {
 	_, ok := retryableStatusCodes[statusCode]
 	return ok
@@ -55,6 +60,7 @@ func (b *Backoff) Delay(attempt int, retryAfter string, now time.Time) time.Dura
 	return b.exponentialDelay(attempt)
 }
 
+// exponentialDelay implements: min(max, initial * 2^attempt) + jitter(0..25%).
 func (b *Backoff) exponentialDelay(attempt int) time.Duration {
 	if attempt < 0 {
 		attempt = 0
@@ -67,6 +73,7 @@ func (b *Backoff) exponentialDelay(attempt int) time.Duration {
 	}
 	base = capDuration(base, b.Max)
 
+	// Jitter spreads retries when many workers hit 429 simultaneously.
 	jitter := time.Duration(b.rng.Float64() * float64(base) * 0.25)
 	return base + jitter
 }

@@ -19,6 +19,7 @@ func writeBatchFile(t *testing.T, name, content string) string {
 	return path
 }
 
+// drainStream reads items and errors concurrently — mirrors production consumer pattern.
 func drainStream(itemsCh <-chan job.PromptItem, errsCh <-chan error) ([]job.PromptItem, []error) {
 	var items []job.PromptItem
 	var errs []error
@@ -75,6 +76,7 @@ func TestStreamItemsReadsTenLineFixture(t *testing.T) {
 }
 
 func TestStreamItemsMalformedLineReturnsErrorAndContinues(t *testing.T) {
+	// Spec: row-level parse failures must not abort the entire batch scan.
 	content := `{"id":"prompt-0000","prompt":"ok"}
 not-json
 {"id":"prompt-0001","prompt":"also ok"}

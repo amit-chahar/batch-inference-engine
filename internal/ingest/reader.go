@@ -1,3 +1,5 @@
+// Package ingest streams batch input files without loading the full dataset into memory.
+// JSONL (one JSON object per line) keeps memory O(1) relative to file size.
 package ingest
 
 import (
@@ -14,7 +16,8 @@ import (
 // Valid rows are sent on the items channel; malformed rows emit errors on the
 // errors channel and scanning continues. Both channels are closed when done.
 //
-// Callers must read from both channels concurrently to avoid deadlocks.
+// Callers must read from both channels concurrently to avoid deadlocks when
+// a malformed line appears between valid rows (producer may block on errs send).
 func StreamItems(path string) (<-chan job.PromptItem, <-chan error) {
 	items := make(chan job.PromptItem)
 	errs := make(chan error)
@@ -36,11 +39,12 @@ func StreamItems(path string) (<-chan job.PromptItem, <-chan error) {
 			lineNumber++
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
-				continue
+				continue // tolerate trailing blank lines in fixtures
 			}
 
 			var item job.PromptItem
 			if err := json.Unmarshal([]byte(line), &item); err != nil {
+				// Row-level failure: report and continue (spec: don't abort whole job).
 				errs <- fmt.Errorf("line %d: invalid JSON: %w", lineNumber, err)
 				continue
 			}

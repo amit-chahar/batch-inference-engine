@@ -1,3 +1,5 @@
+// Command generate_batch writes a JSONL sample input file for local testing and demos.
+// Each line is one PromptItem JSON object — matches the interviewer-clarified input format.
 package main
 
 import (
@@ -71,6 +73,7 @@ func main() {
 			},
 		}
 
+		// Compact single-line JSON — required for JSONL ingest via bufio.Scanner.
 		line, err := json.Marshal(item)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "marshal item %d: %v\n", i, err)

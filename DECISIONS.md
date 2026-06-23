@@ -59,10 +59,22 @@ We deliberately **do not** wrap DO’s managed Batch Inference API (`/v1/batches
 | D22 | DO Spaces extension | **Optional (P2)** | Not started | Spec extension for crash-safe chunk spill; only if core path done early. |
 | D23 | Webhook extension | **Optional (P2)** | Not started | Spec extension; defer until P0/P1 complete. |
 | D24 | Model name | **`llama3.3-70b-instruct` in `.env.example`** | Config default | Placeholder until key scope confirmed; trivial to change via env. |
+| D25 | Code comments | **Package docs + design rationale in code** | Implemented | Helps live code walkthrough with interviewer; see package comments and DECISIONS.md. |
 
 ---
 
-## Decisions by area (with code pointers)
+## Code commenting approach
+
+Comments focus on **why**, not **what**:
+
+- **Package comments** — purpose of each `internal/*` package
+- **Exported symbols** — godoc on public API
+- **Non-obvious mechanics** — dual-channel ingest, per-job mutex, atomic meta write, backoff formula
+- **Interview hooks** — references to spec requirements (429 retry, JSONL, partial failures)
+
+Avoid restating obvious code (`i++ // increment i`). Update comments when behavior changes.
+
+---
 
 ### Platform & interview constraints
 

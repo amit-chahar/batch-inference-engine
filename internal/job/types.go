@@ -1,3 +1,5 @@
+// Package job defines batch job domain types and on-disk persistence.
+// Job state lives under data/jobs/{id}/ as meta.json + append-only results.jsonl.
 package job
 
 import "time"
@@ -6,11 +8,11 @@ import "time"
 type JobStatus string
 
 const (
-	JobStatusPending   JobStatus = "pending"
-	JobStatusRunning   JobStatus = "running"
-	JobStatusCompleted JobStatus = "completed"
-	JobStatusFailed    JobStatus = "failed"
-	JobStatusPartial   JobStatus = "partial"
+	JobStatusPending   JobStatus = "pending"   // accepted, not yet processing
+	JobStatusRunning   JobStatus = "running"   // workers active
+	JobStatusCompleted JobStatus = "completed" // all rows succeeded
+	JobStatusFailed    JobStatus = "failed"    // job-level failure (e.g. unreadable input)
+	JobStatusPartial   JobStatus = "partial"   // mix of successes and row errors
 )
 
 // PromptItem is a single input row from the batch file.
@@ -21,6 +23,7 @@ type PromptItem struct {
 }
 
 // PromptResult is the inference outcome for one prompt row.
+// Either Response or Error is set — both let downstream report partial batches.
 type PromptResult struct {
 	ID       string         `json:"id"`
 	Prompt   string         `json:"prompt"`
@@ -29,7 +32,8 @@ type PromptResult struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// JobMeta tracks persisted job metadata on disk.
+// JobMeta tracks persisted job metadata on disk (data/jobs/{id}/meta.json).
+// Counters are updated atomically under per-job locks during processing.
 type JobMeta struct {
 	JobID          string    `json:"job_id"`
 	Status         JobStatus `json:"status"`
@@ -40,6 +44,7 @@ type JobMeta struct {
 }
 
 // ProgressPercent returns completed progress as a percentage of total items.
+// Uses completed + failed so status reaches 100% even with partial failures.
 func (m JobMeta) ProgressPercent() float64 {
 	if m.TotalItems == 0 {
 		return 0

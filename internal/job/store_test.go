@@ -154,6 +154,7 @@ func TestAppendResultWritesJSONL(t *testing.T) {
 }
 
 func TestConcurrentAppends(t *testing.T) {
+	// Simulates multiple workers appending results + updating counters at once.
 	store := newTestStore(t)
 
 	meta, err := store.CreateJob(20)
